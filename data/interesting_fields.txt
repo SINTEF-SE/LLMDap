@@ -1,0 +1,52 @@
+2987 	 1716 	 0 	 ('section', 'subsections', 0, 'subsections', 0, 'attribute:source characteristics', 0, 'developmental stage') 
+				 ['coral larvae', '8 cell', 'sperm', '2 cell', 'ICM', 'E65', '2cell', '4 cell', 'heart', 'brain', '4cell'] 
+3819 	 2305 	 0 	 ('section', 'subsections', 0, 'subsections', 0, 'attribute:source characteristics', 0, 'strain') 
+				 ['YKB780 (YPH500)', 'C57BL/6', 'YRZ1', 'S288C', 'Wistar', 'BY4741', 'C57BL/6 x 129/Sv', 'C57BL/6J', 'C57BL/6X129Sv mix', 'C57/Bl6', 'CD1 and FVB/N'] 
+4525 	 3024 	 0 	 ('section', 'subsections', 0, 'subsections', 0, 'attribute:source characteristics', 0, 'sex') 
+				 ['male', 'female', 'h-', 'M', 'F', 'NA', 'mixed_sex', 'f', 'm', 'hermaphrodite', 'mating_type_h_minus'] 
+6386 	 3603 	 0 	 ('section', 'subsections', 0, 'subsections', 0, 'attribute:source characteristics', 0, 'cell type') 
+				 ['plasma cell', 'IgG1 germinal center B cells', 'marginal zone B cell', 'follicular B cell', 'IgG1 memory B cells', 'Treg', 'Tconv', 'prostate cancer Cells', 'macrophage', 'non-endothelial cells', 'endothelial cells'] 
+6851 	 1596 	 0 	 ('section', 'subsections', 0, 0, 'attribute:protocols', 0, 'hardware') 
+				 ['Illumina HiSeq 2000', 'Illumina HiSeq 2500', 'NextSeq 500', 'Bioanalyser', 'NextSeq 550', 'Illumina Genome Analyzer II', 'Illumina Genome Analyzer', 'AB SOLiD 4 System', 'Genepix', 'Illumina NovaSeq 6000', 'Illumina HiSeq 4000'] 
+7781 	 4773 	 0 	 ('section', 'subsections', 0, 'subsections', 0, 'attribute:source characteristics', 0, 'organism part') 
+				 ['cerebral cortex', 'normal', 'Tumor', 'spleen', 'lung', 'embryonic stem cell', 'whole body', 'prefrontal cortex area 9', 'leaf', 'hippocampus', 'apical shoot meristem'] 
+8689 	 1584 	 0 	 ('section', 'subsections', 0, 0, 'attribute:protocols', 0, 'software') 
+				 ['MicroArraySuite 5.0', 'salmon v0.9.1, samtools v1.9', 'MicroArraySuite 4.0', 'GeneSpring', 'ImaGene', 'AlbaTraDIS', 'Limma', 'GEM mapper 1.349', 'STAR_2.6.0c', 'TopHat', 'Cufflinks/Cuffmerge'] 
+8853 	 8853 	 0 	 ('section', 'subsections', 0, 'attribute:assays and data', 0, 'assay count') 
+				 ['76', '8', '9', '20', '16', '36', '5', '14', '60', '3', '2'] 
+12907 	 3051 	 0 	 ('section', 'subsections', 0, 'subsections', 0, 'attribute:source characteristics', 0, 'age') 
+				 ['48 hours after fertilization', '12 hours after fertilization', '12 month (middle age)', '6 month (young)', '28 month (old)', '8 to 10 weeks', '7-13 weeks', 'adult', '70', '88', '91'] 
+13632 	 12006 	 0 	 ('section', 'links', 0, 0, 'attributes', 0, 'type') 
+				 ['GEO', 'ENA', 'gxa', 'Biostudies', 'gxa-sc', 'EGA'] 
+13944 	 5647 	 59 	 ('section', 'subsections', 0, 'attribute:samples', 0, 'experimental designs') 
+				 ['cell_type_comparison_design', 'time_series_design', 'co-expression_design', 'growth_condition_design', 'family_history_design', 'stimulus_or_stress_design', 'replicate_design', 'dye_swap_design', 'is_expressed_design', 'disease_state_design', 'in_vitro_design'] 
+14844 	 14844 	 0 	 ('attribute:submission', 0, 'title') 
+				 ['IDS transgen arraYS', 'miRNA chronic OVA aerosol', 'Expression data from ES cells', 'Anopheles gambiae body parts', 'CELF4 microarray', 'in vitro DC models', 'Tfap2a dependnt cha', 'naive-cd25 profiling', 'RNA-Seq of six mammals', 'RNA sequencing in E. coli K12', 'Delta lgt paper'] 
+14844 	 14844 	 0 	 ('attribute:submission', 0, 'releasedate') 
+				 ['2010-05-06', '2012-03-28', '2016-01-21', '2012-05-09', '2012-10-25', '2012-09-21', '2012-04-11', '2013-04-24', '2012-12-07', '2007-07-12', '2015-02-24'] 
+14844 	 14844 	 0 	 ('section', 'subsections', 0, 'attribute:samples', 0, 'sample count') 
+				 ['36', '76', '8', '9', '199', '24', '20', '5', '16', '96', '19'] 
+14912 	 14344 	 0 	 ('section', 'subsections', 0, 'attribute:assays and data', 0, 'assay by molecule') 
+				 ['RNA assay', 'DNA assay', 'protein assay'] 
+14965 	 14783 	 0 	 ('section', 'subsections', 0, 'attribute:assays and data', 0, 'technology') 
+				 ['Array assay', 'Sequencing assay'] 
+15696 	 14841 	 0 	 ('section', 'attribute:study', 0, 'organism') 
+				 ['Montastraea faveolata', 'Mus musculus', 'Saccharomyces cerevisiae', 'Rattus norvegicus', 'Homo sapiens', 'Pichia pastoris', 'Staphylococcus epidermidis', 'Macaca mulatta', 'Staphylococcus aureus', 'Danio rerio', 'Schizosaccharomyces pombe'] 
+15767 	 14792 	 0 	 ('section', 'subsections', 0, 'subsections', 0, 'attribute:source characteristics', 0, 'organism') 
+				 ['Montastraea faveolata', 'Mus musculus', 'Saccharomyces cerevisiae', 'Rattus norvegicus', 'Homo sapiens', 'Pichia pastoris', 'Staphylococcus epidermidis', 'Macaca mulatta', 'Staphylococcus aureus', 'Danio rerio', 'Schizosaccharomyces pombe'] 
+16183 	 14797 	 15301 	 ('section', 'attribute:study', 0, 'study type') 
+				 ['RNA-seq of coding RNA', 'genotyping by array', 'other', 'ChIP-seq', 'microRNA profiling by array', 'RNA-seq of non coding RNA', 'DNA-seq', 'ATAC-seq', 'ChIP-chip by tiling array', 'ChIP-chip by array', 'High-throughput sequencing'] 
+				 ['EFO'] 
+				 ['EFO_0002768', 'EFO_0002761', 'EFO_0003738', 'EFO_0000749', 'EFO_0002767', 'EFO_0002692', 'EFO_0000753', 'EFO_0003737', 'EFO_0002759', 'EFO_0002693', 'EFO_0007045'] 
+16858 	 14296 	 0 	 ('section', 'subsections', 0, 'attribute:organization', 0, 'name') 
+				 ['Broad Institute', 'University of Liverpool', 'RIKEN', 'Institut Curie', 'University of Wisconsin', 'NIEHS', 'UC Berkeley', 'Dana Farber Cancer Institute', 'University of Southampton', 'NIH', 'INSERM'] 
+29857 	 13067 	 0 	 ('section', 'subsections', 0, 'attribute:samples', 0, 'experimental factors') 
+				 ['GROWTH PROTOCOL', 'AGE', 'DEVELOPMENTAL STAGE', 'TREATMENT', 'STRAIN OR LINE', 'ORGANISM PART', 'cell type', 'stimulus', 'time', 'CELL TYPE', 'SEX CHROMOSOME PLOIDY'] 
+105313 	 14751 	 27895 	 ('section', 'subsections', 0, 0, 'attribute:protocols', 0, 'type') 
+				 ['nucleic_acid_extraction', 'labeling', 'hybridization', 'image_aquisition', 'feature_extraction', 'bioassay_data_transformation', 'specified_biomaterial_action', 'grow', 'labelling protocol', 'hybridization protocol', 'sample treatment protocol'] 
+				 ['The MGED Ontology', 'BASE', 'mo', 'MGED Ontology', 'EFO', 'BCGO', 'ArrayExpress', 'MO', 'SNOMEDCT', 'NCIt', 'Experimental Factor Ontology'] 
+				 ['EFO_0004170', 'EFO_0004184', 'EFO_0002944', 'EFO_0004917', 'EFO_0005518', 'EFO_0003813', 'EFO_0003816', 'EFO_0003815', 'EFO_0003789', 'EFO_0003969', 'EFO_0003814'] 
+209877 	 11833 	 0 	 ('section', 'subsections', 0, 'subsections', 0, 'subsections', 0, 0, 'attribute:factors table', 0, 'no. of samples') 
+				 ['18', '3', '4', '1', '2', '5', '6', '99', '100', '8', '20'] 
+242150 	 11182 	 0 	 ('section', 'subsections', 0, 'subsections', 0, 'subsections', 0, 0, 'attribute:characteristics table', 0, 'no. of samples') 
+				 ['18', '3', '4', '1', '2', '5', '6', '9', '7', '99', '100'] 

@@ -1,0 +1,133 @@
+dataset__args:
+    dataset:
+        default: "arxpr2"
+        help: 'one of ["ega","nhrf", "nhrf2", "nhrf3", "simple_test", "study_type", "arxpr","arxpr2"]'
+    dataset_literal_length:
+        default: 25
+        help:  'number of allowable answers, among 25,50,100,200,400.'
+    dataset_shuffle:
+        default: "r"
+        help: "shuffling parameter, s for shufle, int for seed, r for reshufle"
+    dataset_length:
+        default: 1
+        help: "number of papers to analyse"
+    fields_length:
+        default: 0
+        help: "number of papers to analyse per field - once a feald has reached this many predictions, no more predictions are made in this field (to get even results). If 0, this restriction is removed. Must be positive for reshuffling!"
+    mode:
+      default: "train"
+      choices: ["train", "test"]
+    remove_fields:
+        default: "non-single"
+        choices: ["None", "empty", "non-single"]
+        help: "Remove fields to avoid predicting fields without labels (empty) or all fields with no/several values(non-single). "
+    listed_output:
+        default: False
+        help: "predict several values per field. NOTE: I dont expect this option will work since it was only used in early version of the pipeline (but may be looked into again in the future)."
+
+form_filler__llm__args:
+    ff_model:
+        default: "llama3.1I-8b-q4"
+        help: "llm for form filler"
+    outlines_ff_max_tokens:
+        default: 100
+        help: "max number of tokens per field for the outlines form filler"
+    openai_ff_max_tokens:
+        default: 1000
+        help: "max number of tokens for the entire schema for openai form filler"
+    answer_in_quotes:
+        default: True
+        help: "if form foller llm should output answer in quotes. This is needed to not get very short answers, if NOT using listed output"
+
+
+form_filler__outlines__sampler__args:
+    sampler:
+        default: "beam"
+        choices: ["greedy","beam", "multi"]
+        help: "sampler type"
+
+form_filler__outlines__sampler__beam__args:
+    sampler_beams:
+        default: 3
+        help: "number of beams"
+
+form_filler__outlines__sampler__multinomial__args:
+    sampler_top_k:
+        default: 100
+    sampler_top_p:
+        default: 1
+    sampler_temp:
+        default: 0.4
+        help: "temperature"
+    
+
+
+context_shortener__args:
+    context_shortener:
+        default: "retrieval"
+        choices: ["full_paper", "rag","rerank", "reduce", "retrieval"]
+        help: "retrieval refers to the ''inhouse'' retrieval based on the keybert implementation, wheras rag refers to the implementation in RAG.py"
+    chunk_size: 
+        default: 500
+        help: "number of characters in each chunk (the number is a maximum, shorter chunks are made to get the splits in sensible places). This is used for most retrieval methods."
+    chunk_overlap:
+        default: 100
+    similarity_k: 
+        default: 1
+    mmr_param:
+        default: 1.0
+    embedding_model: 
+        default: 'all-MiniLM-L6-v2'
+        help: 'embedding model for retrieval. For "retrieval", should be huggingface firendly format, for "rag" should be ollama. Default is "all-MiniLM-L6-v2", some ollama options are "all-minilm:l6-v2","llama3.1:8b"'
+
+context_shortener__rag__args:
+    retriever_type:
+        default: "simple"
+        choices: ["simple", "fusion", "metadata"]
+
+context_shortener__retrieval__args:
+    chunk_info_to_compare: #direct vs keybert
+        default: "direct"
+        choices: ["direct","keybert"]
+        help: "what to compare the field info to, in retrieval. direct (chunk) or keybert (i.e. keywords from keybert)"
+    field_info_to_compare: 
+        choices: ["description", "choices", "choice-list", "onto-label", "onto-description", "onto-both"]
+        default: "description"
+        help: "what to compare the chunk info against. Field description, choices in form of list, or individual choices, or ontology information"
+    include_choice_every: 
+        default: 1
+        help: "if larger than one, only every n'†h choice is included for comparison to the chunk info"
+
+context_shortener__keybert__args:
+    n_keywords: 
+        default: 8
+    maxsum_factor: 
+        default: 1.0
+
+    # range is (min, min+diff), so default is (1,2)
+    keyphrase_min: # needs to be minimum 1
+        default: 1
+    keyphrase_range_diff: # needs to be minimum 0
+        default: 1 
+
+
+context_shortener__reduce__args:
+    reduce_max_tokens:
+        default: 50
+        help: "deprecated"
+    reduce_temperature:
+        default: 0.4
+        help: "deprecated"
+
+query_storage__args:
+    load:
+        default: True
+        help: "wether to try loading  results from json before calling formfiller"
+    save:
+        default: True
+        help: "wether to save results to json"
+
+other__args:
+    log:
+        default: True
+        help: "Log inputs/outputs to weave"
