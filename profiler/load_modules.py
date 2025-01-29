@@ -66,10 +66,7 @@ def load_modules(args, preloaded_dspy_model = None, preloaded_dataset = None):
                 model_kwargs = {"gguf_file" : "Ministral-8B-Instruct-2410-Q4_K_M.gguf"}
             else:
                 model_id = args.ff_model
-            try:
-                    dspy_model = dspy.HFModel(model = model_id, hf_device_map = "cuda:2", model_kwargs = model_kwargs)
-            except RuntimeError:
-                dspy_model = dspy.HFModel(model = model_id, hf_device_map = "cuda:0")
+            dspy_model = dspy.HFModel(model = model_id, hf_device_map = "cuda:0", model_kwargs = model_kwargs)
         else:
             dspy_model = preloaded_dspy_model
         hf_model = dspy_model.model

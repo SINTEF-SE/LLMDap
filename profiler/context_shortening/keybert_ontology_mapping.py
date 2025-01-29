@@ -35,8 +35,7 @@ def get_keywords(text, kw_model, **kwargs):
     keywords = [x[0] for x in keywords_and_scores]
     scores = [x[1] for x in keywords_and_scores]
     return keywords, scores
-#def get_embedding_model(embedding_model_id = 'all-MiniLM-L6-v2'): return SentenceTransformer(embedding_model_id)#, device = "cuda:1")
-def get_embedding_model(embedding_model_id = 'all-MiniLM-L6-v2'): return SentenceTransformer(embedding_model_id, device = "cuda:1")
+def get_embedding_model(embedding_model_id = 'all-MiniLM-L6-v2'): return SentenceTransformer(embedding_model_id)
 def get_similarity_matrix(kw_embeddings, target_embeddings):  return util.cos_sim(kw_embeddings, target_embeddings)
 
 
