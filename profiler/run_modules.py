@@ -47,6 +47,7 @@ def load_form(key, argstring, pydantic_form):
     return optional_form(**data)
 
 def save_form(key, argstring, form_dict):
+    # to save form from each query (using argstring)
     if not argstring: # something wrong
         raise ValueError
     try:
@@ -97,7 +98,8 @@ class FormFillingIterator:
         load = True, 
         fields_length = 0, 
         mode = "train",
-        dataset_name = ""):
+        dataset_name = "",
+        output_json_path = None):
 
         # make sure we have correct inputs
         if documents is None:
@@ -124,7 +126,7 @@ class FormFillingIterator:
         self.fields_length = fields_length
         self.mode = mode
         self.dataset_name = dataset_name
-
+        self.output_json_path = output_json_path
         self.field_names = self.form_filler.pydantic_form.__fields__ 
 
         self.all_scores = {}
@@ -275,11 +277,13 @@ class FormFillingIterator:
                     filled_form = self.form_filler.forward(self.context_shortener, exclude_fields=self.remove_fields(paper_labels))
                 else:
                     filled_form = self.form_filler.forward(self.context_shortener)
-                save_form(key, self.argstring, filled_form.dict())
+                if self.save:
+                    save_form(key, self.argstring, filled_form.dict())
             except torch.OutOfMemoryError:
                 print("OUT of memory, skipping")
                 self.skips += 1
-                save_form(key, self.argstring, "skipped")
+                if self.save:
+                    save_form(key, self.argstring, "skipped")
                 return
             except openai.BadRequestError as m:
                 print("!! BAD REQUEST ERROR!!")
@@ -294,8 +298,19 @@ class FormFillingIterator:
                     return
 
         elif filled_form == "skipped":
-            skips += 1
+            self.skips += 1
             return
+
+
+        if not self.output_json_path is None:
+            # unlike save_form, which is meant to save masses of queries in training/testing, this is the output file for inference
+            # NOTE: This will overwrite!
+            jsondata = {
+                    "filled_form": filled_form.dict(),
+                    "context" : self.form_filler.contexts,
+                    }
+            with open(self.output_json_path, "w") as f:
+                json.dump(jsondata, f, indent=4)
 
 
         # evaluate

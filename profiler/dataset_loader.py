@@ -215,3 +215,69 @@ def load_paper_text(labels, max_amount,data_folder, mode = "elements"):
     labels = {key:labels[key] for key in full_xmls}
 
     return full_xmls, labels
+
+def load_paper_text_from_file_path(xml_file, mode = "elements"):
+    """ 
+    loads singe xml file from absolute path (used in inference)
+    mode : "single" or "elements" """
+    if mode == "single":
+        # single
+        paper_text = UnstructuredXMLLoader(xml_file, mode = "single").load()[0].page_content
+    
+    elif mode == "elements":
+        # element
+        docs = UnstructuredXMLLoader(xml_file, mode = "elements").load()
+        string = ""
+        for doc in docs:
+            # ignore useless metadata, + some 
+            if doc.metadata["category"] != "UncategorizedText":
+                string += doc.page_content + "\n"
+        paper_text = string
+    else:
+        raise ValueError
+    return paper_text
+
+def count_fields(test_or_train = "train"):
+    g = Arxpr_generator("2_25", test_or_train)
+
+    train_numbers = {
+            "papers" : 0,
+            'hardware_4': 0,
+            'organism_part_5': 0,
+            'experimental_designs_10': 0,
+            'assay_by_molecule_14': 0,
+            'study_type_18': 0
+            }
+
+    i =0
+    while True:
+
+        if i%10==0:
+            print(i) # progress
+        i += 1
+
+        try:
+            key, l = g.get_next_labels()
+        except:
+            break
+        text = g.get_paper_text(key)
+        if not text is None:
+            assert len(text)>50, text
+            if len(text)>50:
+                train_numbers["papers"] += 1
+                for k in l:
+                    train_numbers[k] += len(l[k])
+            else:
+                print("short", key, text) #never happens
+
+            #print(key)
+            #print(l)
+        else:
+            print("missin", key) #never happens
+
+    print(train_numbers)
+    # for train: {'papers': 5000, 'hardware_4': 349, 'organism_part_5': 600, 'experimental_designs_10': 546, 'assay_by_molecule_14': 4452, 'study_type_18': 4247}
+    # for test:  {'papers': 6371, 'hardware_4': 483, 'organism_part_5': 821, 'experimental_designs_10': 707, 'assay_by_molecule_14': 5672, 'study_type_18': 5444}
+
+if __name__ == "__main__":
+    pass

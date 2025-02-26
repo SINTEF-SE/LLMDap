@@ -90,7 +90,7 @@ class FieldFiller(dspy.Module):
         self.signature = signature
         self.verbose = verbose
 
-    def forward(self, prompt_input, get_context, field_type):
+    def forward(self, prompt_input, context, field_type):
 
         # retireve chunks
         if self.verbose:
@@ -98,7 +98,6 @@ class FieldFiller(dspy.Module):
             print("              Signature Desc: ", self.signature)
             print("              Form Desc     : ", prompt_input["answer_field_description"])
 
-        context = get_context(**prompt_input)
 
         if self.verbose:
             # print context
@@ -259,6 +258,7 @@ class SequentialFormFiller(dspy.Module):
 
         fields = pydantic_form.__fields__
         output_dict = {}
+        self.contexts = {}
 
         # iterate through fields
         if self.verbose:
@@ -285,9 +285,11 @@ class SequentialFormFiller(dspy.Module):
                            "answer_field_type":str(field_type),
                            "answer_field_examples":examples
                             }
+            context = get_context(**prompt_input)
+            self.contexts[fieldname] = context
 
             # generate output
-            output = self.field_fillers[fieldname](prompt_input, get_context, field_type)
+            output = self.field_fillers[fieldname](prompt_input, context, field_type)
 
             output_dict[fieldname] = output
 
@@ -449,6 +451,7 @@ class OpenAIFormFiller(dspy.Module):
         predictor = dspy.Predict(signature=signature)
         # prepare context
         context = get_context()
+        self.contexts = context
         if self.verbose:
             print("context:")
             print(context)
@@ -482,7 +485,7 @@ class OpenAIFormFiller(dspy.Module):
 
 @weave.op()
 def openAIFieldFiller(prompt_input, # used for retrieval and generation
-                      get_context,
+                      context,
                       field_type,
                       signature,
                       lm,
@@ -501,7 +504,6 @@ def openAIFieldFiller(prompt_input, # used for retrieval and generation
         dspy.settings.configure(lm=lm) 
         predictor = dspy.Predict(signature=signature)
         # prepare context
-        context = get_context(**prompt_input)
         prompt_input["context"] = context
 
         # generate answer
@@ -557,6 +559,7 @@ class OpenAISequentialFormFiller(dspy.Module):
 
         fields = pydantic_form.__fields__
         output_dict = {}
+        self.contexts = {}
 
         # iterate through fields
         if self.verbose:
@@ -579,6 +582,9 @@ class OpenAISequentialFormFiller(dspy.Module):
                            "answer_field_type":str(field_type),
                            "answer_field_examples":examples
                             }
+
+            context = get_context(**prompt_input)
+            self.contexts[fieldname] = context
         
             all_other_fields = list(self.pydantic_form.__fields__.keys())
             all_other_fields.remove(fieldname)
@@ -587,7 +593,7 @@ class OpenAISequentialFormFiller(dspy.Module):
             # generate output
             output = openAIFieldFiller(
                       prompt_input = prompt_input,
-                      get_context = get_context,
+                      context = context,
                       field_type = field_type,
                       signature = self.signature,
                       lm = self.lm,
@@ -699,6 +705,7 @@ class DirectKeywordSimilarityFiller(dspy.Module):
 
             # generate output
             output = self.get_best_answer_for_field(context_shortener, fieldname, field_type)
+            self.contexts = {} # entire paper used
 
             output_dict[fieldname] = output
 

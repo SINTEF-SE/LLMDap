@@ -98,6 +98,7 @@ def get_shuffled_form_generator(length, only_shuffle_type=False):
         return pydantic_form
     return get_shuffled_form
 
+Metadata_form = get_shuffled_form_generator(25)()
 
 if __name__ == "__main__":
     import pprint
