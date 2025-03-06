@@ -27,6 +27,10 @@ def call_inference(
         paper_url = None,
         **kwargs):
     """
+    Fill out the schema for one or several papers.
+
+    Inputs:
+
     schema: pydantic form that the pipeline should filll out
 
     include ONE of the following four arguments:
@@ -35,6 +39,13 @@ def call_inference(
         paper_path: local path to paper file in XML format
         paper_url: url to paper file in XML format
     This argument should be either a string, a list of strings, or a dict of strings
+
+    kwargs: Any argument from the arguments.yaml file (e.g. llm, retrievl method and parameters like chunk length)
+
+
+    output:
+    dictionary with the filled form and used contexts for each paper.
+
     """
 
     # prepare arguments
