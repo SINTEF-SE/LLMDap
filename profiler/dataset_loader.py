@@ -237,6 +237,27 @@ def load_paper_text_from_file_path(xml_file, mode = "elements"):
         raise ValueError
     return paper_text
 
+def load_paper_text_from_url(paper_url):
+    import requests
+    page = requests.get(paper_url)
+    raw_text = page.text
+    return parse_raw_xml_string(raw_text)
+
+def parse_raw_xml_string(raw_xml_string):
+    from unstructured.partition.xml import partition_xml
+    from lxml.etree import XMLSyntaxError
+    try:
+        docs = partition_xml(text=raw_xml_string)
+    except XMLSyntaxError as e:
+        print("The xml string was not parsable as xml")
+        raise e
+
+    string = ""
+    for doc in docs:
+        if doc.category != "UncategorizedText":
+            string += doc.text+ "\n"
+    return string
+
 def count_fields(test_or_train = "train"):
     g = Arxpr_generator("2_25", test_or_train)
 

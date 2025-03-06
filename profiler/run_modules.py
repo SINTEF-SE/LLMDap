@@ -85,6 +85,7 @@ def save_score(argstring, scores, index_log, choice_log, dataset):
 class FormFillingIterator:
     def __init__(
         self,
+        argument_object,
         context_shortener, 
         form_filler, 
         documents=None, 
@@ -93,24 +94,8 @@ class FormFillingIterator:
         labels=None, 
         evaluation_fnc=None, 
         remove_fields = lambda x:[], 
-        argstring="", 
-        save=True, 
-        load = True, 
-        fields_length = 0, 
-        mode = "train",
-        dataset_name = "",
-        output_json_path = None):
+        ):
 
-        # make sure we have correct inputs
-        if documents is None:
-            assert labels is None
-            assert not form_generator is None
-            assert not document_generator is None
-            assert fields_length>0
-        else:
-            assert not form_filler.pydantic_form is None
-            assert form_generator is None
-            assert document_generator is None
 
         self.context_shortener = context_shortener
         self.form_filler = form_filler
@@ -120,13 +105,17 @@ class FormFillingIterator:
         self.labels = labels
         self.evaluation_fnc = evaluation_fnc
         self.remove_fields = remove_fields
-        self.argstring = argstring
-        self.save = save
-        self.load = load
-        self.fields_length = fields_length
-        self.mode = mode
-        self.dataset_name = dataset_name
-        self.output_json_path = output_json_path
+
+
+        args = argument_object.__dict__
+        self.load = args.pop("load")
+        self.save = args.pop("save")
+        self.mode = args.pop("mode")
+        self.fields_length = args.pop("fields_length")
+        args.pop("dataset_length")
+        self.argstring = str(sorted(args.items()))
+
+        self.dataset_name = args["dataset"]
         self.field_names = self.form_filler.pydantic_form.__fields__ 
 
         self.all_scores = {}
@@ -139,14 +128,24 @@ class FormFillingIterator:
         #self.all_times = []
         self.skips = 0
 
-        if documents is None:
-            self.iterate = self._iterate_using_generator
-        else:
-            self.iterate = self._iterate_using_list
 
     @weave.op()
     def __call__(self):
-        self.iterate()
+        # make sure we have correct inputs
+        if self.documents is None:
+            assert self.labels is None
+            assert not self.form_generator is None
+            assert not self.document_generator is None
+            assert self.fields_length>0
+        else:
+            assert not self.form_filler.pydantic_form is None
+            assert self.form_generator is None
+            assert self.document_generator is None
+
+        if documents is None:
+            self._iterate_using_generator()
+        else:
+            self._iterate_using_list()
 
         if self.documents is None or self.labels:
             return self.evaluate()
@@ -240,8 +239,9 @@ class FormFillingIterator:
 
 
     @weave.op()
-    def fill_single_form(self, key, paper_text, paper_labels=None):
-        pydantic_form = self.form_filler.pydantic_form
+    def fill_single_form(self, key, paper_text, paper_labels=None, pydantic_form=None, return_dict_with_context=False):
+        if pydantic_form is None:
+            pydantic_form = self.form_filler.pydantic_form
 
         filled_form = None
 
@@ -302,15 +302,6 @@ class FormFillingIterator:
             return
 
 
-        if not self.output_json_path is None:
-            # unlike save_form, which is meant to save masses of queries in training/testing, this is the output file for inference
-            # NOTE: This will overwrite!
-            jsondata = {
-                    "filled_form": filled_form.dict(),
-                    "context" : self.form_filler.contexts,
-                    }
-            with open(self.output_json_path, "w") as f:
-                json.dump(jsondata, f, indent=4)
 
 
         # evaluate
@@ -328,6 +319,11 @@ class FormFillingIterator:
                 print(fn, len(self.all_scores[fn]), end= "; ")
             print("")
 
+        if return_dict_with_context:
+            return {
+                    "filled_form": filled_form.dict(),
+                    "context" : self.form_filler.contexts,
+                    }
         return filled_form
 
     def evaluate(self):

@@ -129,5 +129,5 @@ query_storage__args:
 
 other__args:
     log:
-        default: True
+        default: False #True
         help: "Log inputs/outputs to weave"

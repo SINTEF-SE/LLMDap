@@ -31,11 +31,4 @@ if __name__ == "__main__":
 
     args = parse_terminal_arguments()
     prepared_kwargs = load_modules(args)
-    args = args.__dict__
-    load = args.pop("load")
-    save = args.pop("save")
-    args.pop("dataset_length")
-    mode = args.pop("mode")
-    fields_length = args.pop("fields_length")
-    argstring = str(sorted(args.items()))
-    FormFillingIterator(**prepared_kwargs, load = load, save = save, argstring = argstring, fields_length = fields_length, mode=mode, dataset_name = args["dataset"])()
+    FormFillingIterator(args, **prepared_kwargs)()

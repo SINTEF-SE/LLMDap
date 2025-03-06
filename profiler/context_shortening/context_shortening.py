@@ -4,7 +4,8 @@ import torch
 
 from context_shortening import RAG
 from context_shortening.chunking import chunk_by_headeres_and_clean
-from context_shortening import keybert_ontology_mapping as kom
+from context_shortening import keybert_functions
+from context_shortening import get_ontology_descriptions
 
 
 
@@ -163,12 +164,15 @@ class Retrieval(ContextShortener):
 
 
         # define embedding model through these version numbers (dont want to handle the long names through args and main.py...
-        self.emb_model = kom.get_embedding_model(embedding_model_id)
-        self.kw_model = kom.get_kw_model(self.emb_model)
+        self.emb_model = keybert_functions.get_embedding_model(embedding_model_id)
+        self.kw_model = keybert_functions.get_kw_model(self.emb_model)
         
+        self.descriptions = {}
+        self.target_emb = {}
 
         if not pydantic_form is None:
             self.set_pydantic_form(pydantic_form)
+
 
 
 
@@ -176,6 +180,10 @@ class Retrieval(ContextShortener):
         self.set_target_embeddings(pydantic_form)
 
     def set_target_embeddings(self, pydantic_form):
+
+        if self.field_info_to_compare == "description" or self.field_info_to_compare.startswith("onto-"):
+            if self.target_emb:
+                return # no need to update, as the order of literal values are not used
         self.descriptions = {}
         self.target_emb = {}
 
@@ -209,11 +217,9 @@ class Retrieval(ContextShortener):
             mode = self.field_info_to_compare[5:]
             assert mode in ["label", "description", "both"]
             fields = pydantic_form.__fields__
-            assert len(fields) == 1 # TODO allow more and other fields
             for fieldname in fields:
-                pass
-            self.descriptions[fieldname] = kom.get_subontology(mode)
-            self.target_emb[fieldname] = self.emb_model.encode(self.descriptions[fieldname])
+                self.descriptions[fieldname] = get_ontology_descriptions.get_subontology_for_field(mode, fieldname)
+                self.target_emb[fieldname] = self.emb_model.encode(self.descriptions[fieldname])
         else:
             print(field_info_to_compare)
             raise ValueError
@@ -228,7 +234,7 @@ class Retrieval(ContextShortener):
         self.indices_with_keywords = []
         if self.chunk_info_to_compare == "keybert":
             for (i, chunk) in enumerate(self.chunks):
-                keywords, scores = kom.get_keywords(
+                keywords, scores = keybert_functions.get_keywords(
                         chunk, 
                         self.kw_model, 
                         # kwargs
@@ -273,7 +279,7 @@ class Retrieval(ContextShortener):
         chunk_scores = []
         for kw_i, chunk_i in enumerate(self.indices_with_keywords): # keyword indices and chunk indices can be different
 
-            similarity = kom.get_similarity_matrix(
+            similarity = keybert_functions.get_similarity_matrix(
                     self.keyword_embeddingss[kw_i], self.target_emb[fieldname]
                     )
 
@@ -297,7 +303,7 @@ class Retrieval(ContextShortener):
 
         for kw_i, chunk_i in enumerate(self.indices_with_keywords): # keyword indices and chunk indices can be different
 
-            similarity = kom.get_similarity_matrix(
+            similarity = keybert_functions.get_similarity_matrix(
                     self.keyword_embeddingss[kw_i], self.target_emb[fieldname]
                     )
             similarities.append((similarity, self.keyword_scoress[kw_i]))

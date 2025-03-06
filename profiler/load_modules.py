@@ -3,6 +3,7 @@ import outlines
 import dspy
 import openai
 import importlib
+import torch
 
 import dataset_loader
 import metadata_schemas 
@@ -27,7 +28,7 @@ def remove_empty_fields(labels):
 
 
 @weave.op() # log args
-def load_modules(args, preloaded_dspy_model = None, preloaded_dataset = None):
+def load_modules(args, preloaded_dspy_model = None, preloaded_dataset = None, inference_schema = None):
     """
     prepare arguments, then call fill_out_forms 
     preloaded_dspy_model can be inputted to avoid loading it in memory several times
@@ -69,10 +70,7 @@ def load_modules(args, preloaded_dspy_model = None, preloaded_dataset = None):
                 model_id = "jakiAJK/DeepSeek-R1-Distill-Llama-8B_GPTQ-int4"
             else:
                 model_id = args.ff_model
-            try:
-                    dspy_model = dspy.HFModel(model = model_id, hf_device_map = "cuda:2", model_kwargs = model_kwargs)
-            except RuntimeError:
-                dspy_model = dspy.HFModel(model = model_id, hf_device_map = "cuda:0")
+            dspy_model = dspy.HFModel(model = model_id, hf_device_map = "cuda:2" if torch.cuda.device_count()>1 else "cuda:0", model_kwargs = model_kwargs)
         else:
             dspy_model = preloaded_dspy_model
         hf_model = dspy_model.model
@@ -98,19 +96,9 @@ def load_modules(args, preloaded_dspy_model = None, preloaded_dataset = None):
             raise ValueError
 
 
-    if args.dataset is None: # inference mode:
-
-        schema_path = args.schema_path
-        if schema_path.endswith(".py"):
-            schema_path = schema_path[:-3]
-        schema_path = schema_path.replace("/",".")
-        pydantic_form = importlib.import_module(schema_path).Metadata_form
-
-        paper_text = dataset_loader.load_paper_text_from_file_path(args.paper_path)
-
-        dataset_kwargs = dict(
-                documents = {0:paper_text},
-                )
+    if not inference_schema is None: # inference mode:
+        pydantic_form = inference_schema
+        dataset_kwargs = dict() # no need for a dataset, as the iteration functions of run_modules are not run in inference mode
 
     elif args.dataset == "arxpr2" and args.dataset_shuffle == "r":
         # do dynamic reloading+shuffling

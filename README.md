@@ -30,15 +30,8 @@ python main.py --dataset simple_test --no-log
 Look through `introduction.ipynb` for an introduction to how the different parts work.
 
 
-For running inference - i.e. on a single paper instead of on a dataset meant for training or testing, run:
-```
-python run_inference.py XML_FILENAME SCHEMA_FILENAME OUTPUT_FILENAME (OPTIONAL ARGUMENTS)
-```
-for example:
-```
-python run_inference.py /mnt/data/upcast/data/all_xmls/12093373_ascii_pmcoa.xml metadata_schemas/arxpr2_schema.py inference_output.json --similarity_k 5 --field_info_to_compare choices
-```
-
+For running inference - i.e. for analysing one or several papers for the purpose of the output instead of evaluation with labels,
+use run_inference.call_inference()
 ## Quick file overview
 
 Folders:
