@@ -1,0 +1,39 @@
+{
+      "context_shortener": {
+          "type": "string",
+          "description": "Type of context shortener to use",
+          "default": "rag"
+      },
+      "form_filler": {
+          "type": "string",
+          "description": "Type of form filling method",
+          "default": "openai"
+      },
+      "form_generator": {
+          "type": "string",
+          "description": "Type of form generator",
+          "default": "default_generator"
+      },
+      "document_generator": {
+          "type": "string",
+          "description": "Type of document generator",
+          "default": "default_document_generator"
+      },
+      "fields_length": {
+          "type": "integer",
+          "description": "Number of fields required",
+          "default": 1
+      },
+      "pydantic_form": {
+            "type": "object",
+            "description": "Pydantic model definition for form filling",
+            "properties": {
+                "field1": {"type": "string"},
+                "field2": {"type": "integer"},
+                "field3": {"type": "boolean"}
+            }
+          }
+}
+
+
+  
