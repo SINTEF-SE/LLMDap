@@ -1,0 +1,14 @@
+[core]
+	repositoryformatversion = 0
+	filemode = true
+	bare = false
+	logallrefupdates = true
+[branch "main"]
+	vscode-merge-base = origin/main
+[branch "s_ver1"]
+	vscode-merge-base = origin/main
+[branch "s_ver2"]
+	vscode-merge-base = origin/main
+[remote "origin"]
+	url = https://github.com/Shang1607/bacholer-test
+	fetch = +refs/heads/*:refs/remotes/origin/*
