@@ -1,44 +1,45 @@
 import transformers
 import torch
+import openai
+import os
+import sys
 
+# Import API key
+sys.path.append(os.path.dirname(__file__))
+try:
+    from openai_key import API_KEY
+except ImportError:
+    sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+    try:
+        from profiler.openai_key import API_KEY
+    except ImportError:
+        API_KEY = None
 
 
 class LLM:
     def __init__(self):
-        self.load_aaditya_llm(device = "cuda:0")
-
-    def ask(self,prompt,max_tokens=50, temperature=0.1):
-        generation_config = transformers.GenerationConfig(
-                    max_new_tokens=max_tokens, # amount of tokens, increase if you want more than one word output
-                    eos_token_id=self.terminators,
-                    pad_token_id=self.terminators[0], # would be inferred and printed a msg
-                    do_sample=True,
-                    temperature=temperature,
-                    top_p=0.9,
-                    )
-        inputs = torch.tensor([self.pipeline.tokenizer(prompt).data["input_ids"]]).to(self.device)
-        outputs = self.pipeline.model.generate(
-                    inputs,
-                    generation_config,
-                    )
-        outputs = self.pipeline.tokenizer.decode(outputs[0])
-        return outputs
-
-    def load_aaditya_llm(self, device):
-        self.device = device
-        self.softmax = torch.nn.Softmax(dim=0)
-
-        model_id = "aaditya/OpenBioLLM-Llama3-8B"
+        # Set OpenAI API key
+        if not API_KEY:
+            raise ValueError("OpenAI API key not found. Please set it in llm_ui/app/openai_key.py or profiler/openai_key.py")
         
-        self.pipeline = transformers.pipeline(
-                    "text-generation",
-                    model=model_id,
-                    model_kwargs={"torch_dtype": torch.bfloat16},
-                    device=self.device,
-                    )
+        self.client = openai.OpenAI(api_key=API_KEY)
+        print("OpenAI client initialized successfully")
         
-        
-        self.terminators = [
-                    self.pipeline.tokenizer.eos_token_id,
-                    self.pipeline.tokenizer.convert_tokens_to_ids("<|eot_id|>")
-                    ]
+    def ask(self, prompt, max_tokens=500, temperature=0.3):
+        """
+        Send a prompt to OpenAI and get a response
+        """
+        try:
+            response = self.client.chat.completions.create(
+                model="gpt-4o",  # You can change this to gpt-3.5-turbo if needed
+                messages=[
+                    {"role": "system", "content": "You are a helpful medical research assistant specializing in analyzing biomedical papers and datasets."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=max_tokens,
+                temperature=temperature
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            print(f"Error in OpenAI API call: {str(e)}")
+            raise e

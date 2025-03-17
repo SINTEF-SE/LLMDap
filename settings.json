@@ -1,0 +1,1 @@
+{"temperature": 0.1, "max_tokens": 500, "model": "gpt-3.5-turbo", "prompt_template": "\nBased on the following datasets: {datasets}\n\nContext title: {title}\nContext abstract: {abstract}\n\nPlease answer this question: {question}\n"}

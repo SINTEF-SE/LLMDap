@@ -1,3 +1,18 @@
 {
-  "0": null
+  "0": {
+    "filled_form": {
+      "hardware_4": "hiseq x ten",
+      "organism_part_5": "spleen",
+      "experimental_designs_10": "time series design",
+      "assay_by_molecule_14": "dna assay",
+      "study_type_18": "transcription profiling by array"
+    },
+    "context": {
+      "hardware_4": "RegionsNATURECOMMUNICATIONSTableMultivariateLASSOanalysis.ItemAlltreatmentsPLAT/PYRTarget-monoTOP/PYRPriorTreatmentGendernrofTandemDuplicationsnrof10kb\u20131MbdeletionsDBS2DBS5DBS11SBS17bSBS39SBS41APCKRASPIK3CAFBXW7GainGainGainGainGainGainGainGainGainLossLossLossLossLossLossLossLossLossLoss(nogenesinpeak)(nogenesinpeak)OxaliplatincontainingItemsthatreachedunivariatestatisticalsigni\ufb01cance(pwereusedinamultivariablepenalized",
+      "organism_part_5": "beconsideredasacontra-indicationfortheuseofanti-EGFRtreatment.Molecularbiomarkersforpotentialoff-labelusethatwerefoundinourcohortincludeampli\ufb01cationsofERBB2METandlossofBRCA1andBRCA2throughdeletionorhighimpactlossofTSC1andTSC2throughhighimpactandpossiblefusionsofInpatientsinourcohortcarriedaKRASG12Cforwhichaninhibitormaybecomeavailableinthenearfuture33.Inforofourpatientsoneormoretargetedtreatmentsarepotentially",
+      "experimental_designs_10": "clinicalcontributors.andaremembersoftheCPCT-02studyteamand/orCPCTboard.coordinatedthesequencingofsamplesandcontributedtothebioinformaticsanalyses.CompetinginterestsTheauthorsdeclarenocompetinginterests.AdditionalinformationinformationisavailableforthispaperatPeerreviewinformationNatureCommunicationsthanksKinSilviaMarsoniandthereviewer(s)fortheircontributiontothepeerreviewofthiswork.Peerreviewerreportsareavailable.",
+      "assay_by_molecule_14": "beconsideredasacontra-indicationfortheuseofanti-EGFRtreatment.Molecularbiomarkersforpotentialoff-labelusethatwerefoundinourcohortincludeampli\ufb01cationsofERBB2METandlossofBRCA1andBRCA2throughdeletionorhighimpactlossofTSC1andTSC2throughhighimpactandpossiblefusionsofInpatientsinourcohortcarriedaKRASG12Cforwhichaninhibitormaybecomeavailableinthenearfuture33.Inforofourpatientsoneormoretargetedtreatmentsarepotentially",
+      "study_type_18": "clinicalcontributors.andaremembersoftheCPCT-02studyteamand/orCPCTboard.coordinatedthesequencingofsamplesandcontributedtothebioinformaticsanalyses.CompetinginterestsTheauthorsdeclarenocompetinginterests.AdditionalinformationinformationisavailableforthispaperatPeerreviewinformationNatureCommunicationsthanksKinSilviaMarsoniandthereviewer(s)fortheircontributiontothepeerreviewofthiswork.Peerreviewerreportsareavailable."
+    }
+  }
 }
