@@ -15,13 +15,14 @@ sys.path.append(profiler_dir)
 print(f"Project root: {project_root}")
 print(f"Profiler directory: {profiler_dir}")
 
-# Now try the import
+# Try to import call_inference at the module level
 try:
     from profiler.run_inference import call_inference
 except ImportError as e:
-    st.error(f"Error importing run_inference: {str(e)}")
+    print(f"Error importing run_inference: {str(e)}")
     call_inference = None
 
+# Move these functions outside the show() function
 def handle_input(uploaded_file, xml_url):
     """Handle uploaded file or URL input"""
     if uploaded_file is not None:

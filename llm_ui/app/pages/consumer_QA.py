@@ -2,10 +2,15 @@ import streamlit as st
 import json
 import sys
 import os
+
+
+# Add paths for import
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from llm import LLM
 
 def load_previous_datasets():
-    """Laster inn tidligere søkte datasett fra fil."""
+    """Load previously queried datasets from file."""
     try:
         with open("previous_datasets.json", "r") as f:
             return json.load(f)
@@ -13,7 +18,7 @@ def load_previous_datasets():
         return []
 
 def load_context():
-    """Laster inn metadata (title, abstract) fra context.json."""
+    """Load metadata (title, abstract) from context.json."""
     try:
         with open("context.json", "r") as f:
             return json.load(f)
@@ -21,21 +26,31 @@ def load_context():
         return {'title': '', 'abstract': ''}
 
 def load_settings():
-    """Laster inn konfigurasjonsparametere fra settings.json."""
+    """Load configuration parameters from settings.json."""
     try:
         with open('settings.json', 'r') as f:
             return json.load(f)
     except FileNotFoundError:
         return {'temperature': 0.0, 'max_tokens': 50, 'prompt_template': ''}
 
-def show(llm):
+def show():
     st.title("Dataset Discovery & Q&A")
+    
+    # Initialize LLM if not already in session state
+    if 'llm' not in st.session_state:
+        try:
+            with st.spinner("Initializing LLM... This may take a moment."):
+                st.session_state.llm = LLM()
+            st.success("LLM initialized successfully!")
+        except Exception as e:
+            st.error(f"Error initializing LLM: {str(e)}")
+            st.stop()
 
     query = st.text_input("Enter your query to find datasets:")
 
     if st.button("Search"):
         with st.spinner("Searching for datasets... Please wait."):
-            response = llm.ask(f"Find datasets related to: {query}")
+            response = st.session_state.llm.ask(f"Find datasets related to: {query}")
 
             try:
                 datasets = json.loads(response)  
@@ -66,17 +81,18 @@ def show(llm):
             if question:
                 with st.spinner("Generating answer..."):
                     combined_context = "\n".join([d["title"] for d in selected_datasets])
-                    prompt = settings['prompt_template']
+                    prompt = settings.get('prompt_template', '')
                     prompt = prompt.replace("{question}", question)
-                    prompt = prompt.replace("{title}", context["title"])
-                    prompt = prompt.replace("{abstract}", context["abstract"])
+                    prompt = prompt.replace("{title}", context.get("title", ''))
+                    prompt = prompt.replace("{abstract}", context.get("abstract", ''))
                     prompt = prompt.replace("{datasets}", combined_context)
 
-                    output = llm.ask(prompt, max_tokens=settings['max_tokens'], temperature=settings['temperature'])
+                    output = st.session_state.llm.ask(prompt, 
+                                                    max_tokens=settings.get('max_tokens', 50), 
+                                                    temperature=settings.get('temperature', 0.3))
 
                     st.subheader("Answer:")
                     st.write(output)
-
 
 """import sys
 import os
@@ -151,6 +167,9 @@ if question:
         # Vise svaret i UI-et
         st.subheader("Answer:")
         st.write(output)"""
+
+
+
 
 
 

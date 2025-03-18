@@ -5,7 +5,7 @@ import json
 import requests
 
 # Add project root to path
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..'))
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
 sys.path.append(project_root)
 
 # Add profiler directory to path
@@ -13,7 +13,8 @@ profiler_dir = os.path.join(project_root, 'profiler')
 sys.path.append(profiler_dir)
 
 # Import the LLM class
-from llm_ui.app.llm import LLM
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from llm import LLM
 
 # Import the specific functions from profiler.py
 from pages.profiler import handle_input, handle_schema, run_pipeline
@@ -31,11 +32,12 @@ if 'chat_history' not in st.session_state:
 if 'json_text' not in st.session_state:
     st.session_state.json_text = {}
 
+def show():
 # Create tabs for different functionalities
-tab1, tab2 = st.tabs(["Process Papers", "Chat with LLM"])
+    tab1, tab2 = st.tabs(["Process Papers", "Chat with LLM"])
 
-with tab1:
-    st.subheader("Upload a scientific paper (.xml) or provide a URL")
+    with tab1:
+        st.subheader("Upload a scientific paper (.xml) or provide a URL")
 
     uploaded_file = st.file_uploader("Choose an .xml file", type=["xml"], key="xml_uploader")
     xml_url = st.text_input("Or provide a URL to an .xml file")
@@ -176,32 +178,32 @@ with tab1:
         for paper_id, paper in st.session_state.processed_papers.items():
             st.write(f"- {paper['title']} (ID: {paper_id})")
 
-with tab2:
-    st.subheader("Chat with LLM about Medical Papers")
+        with tab2:
+            st.subheader("Chat with LLM about Medical Papers")
     
-    # Initialize LLM
-    if 'llm' not in st.session_state:
-        try:
-            with st.spinner("Initializing LLM... This may take a moment."):
-                st.session_state.llm = LLM()
-            st.success("LLM initialized successfully!")
-        except Exception as e:
-            st.error(f"Error initializing LLM: {str(e)}")
+        # Initialize LLM
+        if 'llm' not in st.session_state:
+            try:
+                with st.spinner("Initializing LLM... This may take a moment."):
+                    st.session_state.llm = LLM()
+                st.success("LLM initialized successfully!")
+            except Exception as e:
+                st.error(f"Error initializing LLM: {str(e)}")
     
     # Check if we have processed papers
-    if not st.session_state.processed_papers:
-        st.warning("No processed papers available. Please process papers in the first tab.")
-    else:
-        # Paper selection options
-        paper_options = {"All processed papers": "all"}
-        paper_options.update({f"{paper['title']} (ID: {paper_id})": paper_id 
-                         for paper_id, paper in st.session_state.processed_papers.items()})
+        if not st.session_state.processed_papers:
+            st.warning("No processed papers available. Please process papers in the first tab.")
+        else:
+            # Paper selection options
+            paper_options = {"All processed papers": "all"}
+            paper_options.update({f"{paper['title']} (ID: {paper_id})": paper_id 
+                             for paper_id, paper in st.session_state.processed_papers.items()})
         
-        selected_paper_option = st.selectbox("Select papers to discuss:", 
-                                           options=list(paper_options.keys()),
-                                           index=0)
+            selected_paper_option = st.selectbox("Select papers to discuss:", 
+                                               options=list(paper_options.keys()),
+                                               index=0)
         
-        selected_paper_id = paper_options[selected_paper_option]
+            selected_paper_id = paper_options[selected_paper_option]
         
         # Setup chat history for the selection
         if selected_paper_id not in st.session_state.chat_history:
