@@ -30,6 +30,10 @@ class LLM:
         Send a prompt to OpenAI and get a response
         """
         try:
+            print(f"Sending prompt to OpenAI (length: {len(prompt)} chars)")
+            print(f"First 200 chars of prompt: {prompt[:200]}...")
+            print(f"Last 200 chars of prompt: {prompt[-200:] if len(prompt) > 200 else prompt}")
+            
             response = self.client.chat.completions.create(
                 model="gpt-4o",  # You can change this to gpt-3.5-turbo if needed
                 messages=[
