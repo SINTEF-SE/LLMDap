@@ -230,122 +230,276 @@ def load_settings():
 
 def extract_dataset_metadata(dataset):
     """Extract and format metadata from a dataset for the LLM."""
+    import re
+    import os
+    import requests
+    
     metadata = []
     
-    if dataset["title"]:
+    # Basic metadata always available
+    if dataset.get("title"):
         metadata.append(f"Title: {dataset['title']}")
     
-    if dataset["accession"]:
+    if dataset.get("accession"):
         metadata.append(f"Accession: {dataset['accession']}")
-    
-    if dataset["pmid"]:
+        
+    if dataset.get("pmid"):
         metadata.append(f"PMID: {dataset['pmid']}")
+        metadata.append(f"PubMed Link: https://pubmed.ncbi.nlm.nih.gov/{dataset['pmid']}/")
     
-    # Add all the basic fields we already captured
-    for field in ["description", "organism", "study_type", "experimental_factors", 
-                 "technology", "release_date"]:
-        if dataset.get(field):
-            metadata.append(f"{field.replace('_', ' ').title()}: {dataset[field]}")
-    
-    # Try to directly read the JSON file
-    try:
-        with open(dataset["file_path"], 'r') as f:
-            json_data = json.loads(f.read())
-        
-        # Extract key information from the JSON structure
-        extracted_data = {}
-        
-        # Extract info from submissions section
-        if 'submissions' in json_data and isinstance(json_data['submissions'], list) and len(json_data['submissions']) > 0:
-            submission = json_data['submissions'][0]
-            if 'title' in submission:
-                extracted_data['Submission Title'] = submission['title']
+    # STEP 1: PUBMED FETCHER - works well already
+    if dataset.get("pmid") and dataset["pmid"] != "unknown":
+        try:
+            import requests
+            from xml.etree import ElementTree as ET
             
-            # Get submitter info
-            if 'submitter' in submission:
-                submitter_info = []
-                for key, value in submission['submitter'].items():
-                    if key in ['firstName', 'lastName', 'email', 'affiliation']:
-                        submitter_info.append(f"{key}: {value}")
-                if submitter_info:
-                    extracted_data['Submitter'] = ", ".join(submitter_info)
-        
-        # Extract section data
-        if 'section' in json_data:
-            for section in json_data['section']:
-                if isinstance(section, dict) and 'type' in section:
-                    section_type = section['type'].title()
-                    
-                    # Extract attributes
-                    if 'attributes' in section:
-                        for attr in section['attributes']:
-                            if isinstance(attr, dict) and 'name' in attr and 'value' in attr:
-                                attr_name = attr['name'].title()
-                                attr_value = attr['value']
-                                key = f"{section_type} - {attr_name}"
-                                extracted_data[key] = attr_value
-                    
-                    # Extract from subsections
-                    if 'subsections' in section:
-                        for subsection in section['subsections']:
-                            if isinstance(subsection, dict) and 'type' in subsection:
-                                subsection_type = subsection['type'].title()
-                                
-                                # Get attributes
-                                if 'attributes' in subsection:
-                                    for attr in subsection['attributes']:
-                                        if isinstance(attr, dict) and 'name' in attr and 'value' in attr:
-                                            attr_name = attr['name'].title()
-                                            attr_value = attr['value']
-                                            key = f"{section_type} - {subsection_type} - {attr_name}"
-                                            extracted_data[key] = attr_value
-        
-        # Add the extracted data to metadata
-        for key, value in extracted_data.items():
-            metadata.append(f"{key}: {value}")
-        
-        # Add an analysis of filled_form data if it exists in an updated_output file
-        # This helps bridge between the Provider and Consumer views
-        output_path = f"updated_output_{os.path.basename(dataset['file_path']).split('___')[0]}.json"
-        if os.path.exists(output_path):
-            try:
-                with open(output_path, 'r') as f:
-                    output_data = json.load(f)
+            pmid = dataset["pmid"]
+            pubmed_url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id={pmid}&retmode=xml"
+            
+            response = requests.get(pubmed_url, timeout=10)
+            if response.status_code == 200:
+                root = ET.fromstring(response.text)
                 
-                if "0" in output_data and "filled_form" in output_data["0"]:
-                    metadata.append("\nPROFILER ANALYSIS:")
-                    for key, value in output_data["0"]["filled_form"].items():
-                        metadata.append(f"  {key.replace('_', ' ').title()}: {value}")
+                # Extract article title
+                article_title = root.find(".//ArticleTitle")
+                if article_title is not None and article_title.text:
+                    metadata.append(f"\n### Publication Information:")
+                    metadata.append(f"Article Title: {article_title.text}")
+                
+                # Extract abstract text
+                abstract_texts = root.findall(".//AbstractText")
+                if abstract_texts:
+                    metadata.append(f"Abstract:")
+                    abstract_content = []
+                    for abstract_part in abstract_texts:
+                        label = abstract_part.get("Label")
+                        if label:
+                            abstract_content.append(f"**{label}**: {abstract_part.text}")
+                        else:
+                            abstract_content.append(abstract_part.text)
+                    metadata.append("\n".join(abstract_content))
+                
+                # Extract publication date
+                pub_date = root.find(".//PubDate")
+                if pub_date is not None:
+                    year = pub_date.find("Year")
+                    month = pub_date.find("Month")
+                    day = pub_date.find("Day")
+                    pub_date_str = ""
+                    if year is not None and year.text:
+                        pub_date_str += year.text
+                    if month is not None and month.text:
+                        pub_date_str += f"-{month.text}"
+                    if day is not None and day.text:
+                        pub_date_str += f"-{day.text}"
+                    if pub_date_str:
+                        metadata.append(f"Publication Date: {pub_date_str}")
+                
+                # Extract authors
+                authors = root.findall(".//Author")
+                if authors:
+                    author_names = []
+                    for author in authors[:5]:  # Limit to first 5 authors
+                        last_name = author.find("LastName")
+                        first_name = author.find("ForeName")
+                        if last_name is not None and last_name.text:
+                            author_name = last_name.text
+                            if first_name is not None and first_name.text:
+                                author_name = f"{first_name.text} {author_name}"
+                            author_names.append(author_name)
+                    if author_names:
+                        if len(authors) > 5:
+                            author_names.append("et al.")
+                        metadata.append(f"Authors: {', '.join(author_names)}")
+                
+                # Extract journal info
+                journal = root.find(".//Journal/Title")
+                if journal is not None and journal.text:
+                    metadata.append(f"Journal: {journal.text}")
+                    
+                # NEW: Extract MeSH terms for better context
+                mesh_headings = root.findall(".//MeshHeading")
+                if mesh_headings:
+                    mesh_terms = []
+                    for heading in mesh_headings[:10]:  # Limit to 10 terms
+                        descriptor = heading.find("DescriptorName")
+                        if descriptor is not None and descriptor.text:
+                            mesh_terms.append(descriptor.text)
+                    if mesh_terms:
+                        metadata.append(f"MeSH Terms: {', '.join(mesh_terms)}")
+        except Exception as e:
+            metadata.append(f"Error fetching PubMed data: {str(e)}")
+    
+    # STEP 2: ARRAYEXPRESS DIRECT API - Different endpoints for more data
+    try:
+        import requests
+        accession = dataset['accession']
+        
+        # Try the main BioStudies API first
+        ae_url = f"https://www.ebi.ac.uk/biostudies/api/v1/studies/{accession}"
+        response = requests.get(ae_url, timeout=10)
+        
+        if response.status_code == 200:
+            ae_data = response.json()
+            metadata.append(f"\n### ArrayExpress Dataset Information:")
+            
+            if 'name' in ae_data:
+                metadata.append(f"Dataset Name: {ae_data['name']}")
+            
+            # Extract key metadata
+            if 'section' in ae_data:
+                for section in ae_data['section']:
+                    if isinstance(section, dict) and section.get('type') == 'study':
+                        if 'attributes' in section:
+                            for attr in section['attributes']:
+                                if isinstance(attr, dict) and 'name' in attr and 'value' in attr:
+                                    name = attr['name'].capitalize()
+                                    value = attr['value']
+                                    metadata.append(f"{name}: {value}")
+        
+        # Try the ArrayExpress legacy API (more detailed for older datasets)
+        legacy_url = f"https://www.ebi.ac.uk/arrayexpress/json/v3/experiments/{accession}"
+        response = requests.get(legacy_url, timeout=10)
+        
+        if response.status_code == 200:
+            try:
+                legacy_data = response.json()
+                if 'experiments' in legacy_data and 'experiment' in legacy_data['experiments'] and legacy_data['experiments']['experiment']:
+                    exp = legacy_data['experiments']['experiment'][0]
+                    metadata.append(f"\n### ArrayExpress Detailed Information:")
+                    
+                    # Extract key fields
+                    for field in ['name', 'experimenttype', 'description', 'organism']:
+                        if field in exp:
+                            metadata.append(f"{field.capitalize()}: {exp[field]}")
+                    
+                    # Extract sample attributes
+                    if 'sampleattribute' in exp:
+                        metadata.append("Sample Attributes:")
+                        for attr in exp['sampleattribute']:
+                            if 'category' in attr and 'value' in attr:
+                                metadata.append(f"  {attr['category']}: {attr['value']}")
+                    
+                    # Extract experimental factors
+                    if 'experimentalfactor' in exp:
+                        metadata.append("Experimental Factors:")
+                        for factor in exp['experimentalfactor']:
+                            if 'name' in factor:
+                                metadata.append(f"  {factor['name']}")
+                    
+                    # Extract protocols
+                    if 'protocol' in exp:
+                        metadata.append("Protocols:")
+                        for protocol in exp['protocol']:
+                            if 'text' in protocol:
+                                text = protocol['text']
+                                if len(text) > 200:
+                                    text = text[:200] + "..."
+                                metadata.append(f"  {protocol.get('type', 'Protocol')}: {text}")
             except:
                 pass
-    
-    except Exception as e:
-        # Add a fallback extraction that just tries to pull some key fields
+                
+        # Try the detailed IDF download (contains experiment design)
         try:
-            with open(dataset["file_path"], 'r') as f:
-                content = f.read()
-                
-                # Try to find study type
-                study_type_match = re.search(r'"study type"\s*:\s*"([^"]+)"', content)
-                if study_type_match:
-                    metadata.append(f"Study Type: {study_type_match.group(1)}")
-                
-                # Try to find organism
-                organism_match = re.search(r'"organism"\s*:\s*"([^"]+)"', content)
-                if organism_match:
-                    metadata.append(f"Organism: {organism_match.group(1)}")
-                
-                # Try to find experimental designs
-                exp_design_match = re.search(r'"experimental designs"\s*:\s*"([^"]+)"', content)
-                if exp_design_match:
-                    metadata.append(f"Experimental Designs: {exp_design_match.group(1)}")
-                
-                # Try to find hardware
-                hardware_match = re.search(r'"hardware"\s*:\s*"([^"]+)"', content)
-                if hardware_match:
-                    metadata.append(f"Hardware: {hardware_match.group(1)}")
+            idf_url = f"https://www.ebi.ac.uk/arrayexpress/files/{accession}/{accession}.idf.txt"
+            idf_response = requests.get(idf_url, timeout=10)
+            
+            if idf_response.status_code == 200:
+                idf_content = idf_response.text
+                metadata.append(f"\n### IDF File Content (Experiment Design):")
+                lines = idf_content.strip().split('\n')[:20]  # First 20 lines
+                for line in lines:
+                    metadata.append(line)
+                metadata.append("...")
         except:
-            metadata.append("Error extracting JSON metadata")
+            pass
+            
+        # Try the SDRF download (contains sample details)
+        try:
+            sdrf_url = f"https://www.ebi.ac.uk/arrayexpress/files/{accession}/{accession}.sdrf.txt"
+            sdrf_response = requests.get(sdrf_url, timeout=10)
+            
+            if sdrf_response.status_code == 200:
+                sdrf_content = sdrf_response.text
+                metadata.append(f"\n### SDRF File Content (Sample Details):")
+                lines = sdrf_content.strip().split('\n')[:10]  # First 10 lines
+                for line in lines:
+                    if len(line) > 200:
+                        line = line[:200] + "..."
+                    metadata.append(line)
+                metadata.append("...")
+        except:
+            pass
+    except Exception as e:
+        metadata.append(f"Error fetching ArrayExpress data: {str(e)}")
+    
+    # STEP 3: EUROPEPMC API - For additional experimental details
+    try:
+        if dataset.get("pmid") and dataset["pmid"] != "unknown":
+            pmid = dataset["pmid"]
+            europepmc_url = f"https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=EXT_ID:{pmid}%20AND%20SRC:MED&resultType=core&format=json"
+            
+            response = requests.get(europepmc_url, timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                if 'resultList' in data and 'result' in data['resultList'] and data['resultList']['result']:
+                    article = data['resultList']['result'][0]
+                    
+                    metadata.append(f"\n### Additional Publication Details:")
+                    
+                    # Get publication type
+                    if 'pubTypeList' in article and 'pubType' in article['pubTypeList']:
+                        pub_types = ", ".join(article['pubTypeList']['pubType'])
+                        metadata.append(f"Publication Type: {pub_types}")
+                    
+                    # Get grants
+                    if 'grantsList' in article and 'grant' in article['grantsList']:
+                        grants = []
+                        for grant in article['grantsList']['grant'][:3]:
+                            if 'agency' in grant:
+                                grant_info = grant['agency']
+                                if 'grantId' in grant:
+                                    grant_info += f" ({grant['grantId']})"
+                                grants.append(grant_info)
+                        if grants:
+                            metadata.append(f"Funding: {', '.join(grants)}")
+                    
+                    # Get chemicals/substances
+                    if 'chemicalList' in article and 'chemical' in article['chemicalList']:
+                        chemicals = []
+                        for chemical in article['chemicalList']['chemical'][:5]:
+                            if 'name' in chemical:
+                                chemicals.append(chemical['name'])
+                        if chemicals:
+                            metadata.append(f"Chemicals/Substances: {', '.join(chemicals)}")
+    except Exception as e:
+        pass  # Silently continue
+    
+    # STEP 4: Try to extract minimal info from our JSON file
+    try:
+        with open(dataset["file_path"], 'r') as f:
+            file_content = f.read()
+            data = json.loads(file_content)
+            
+            # Get basic file names
+            if 'files' in data and isinstance(data['files'], list):
+                file_paths = [file['path'] for file in data['files'][:10] if isinstance(file, dict) and 'path' in file]
+                
+                if file_paths:
+                    metadata.append("\n### Dataset Files:")
+                    for file_path in file_paths:
+                        metadata.append(f"- {file_path}")
+                        
+            # Use regex as backup if JSON parsing fails for some sections
+            if not file_paths:
+                # Extract files using regex
+                file_matches = re.findall(r'"path"\s*:\s*"([^"]+\.(txt|cel|gpr|csv|tsv|idf|sdrf))"', file_content)
+                if file_matches:
+                    metadata.append("\n### Dataset Files (Extracted):")
+                    for match in file_matches[:10]:
+                        metadata.append(f"- {match[0]}")
+    except Exception as e:
+        pass  # Silently continue if file can't be read
     
     return "\n".join(metadata)
 
@@ -447,30 +601,32 @@ def show():
         # In the section where you process the user's question:
         if question and st.button("Get Answer"):
             with st.spinner("Analyzing datasets and generating answer..."):
-                # Format the datasets for the prompt with detailed information
+                # Format the datasets for the prompt with detailed metadata
                 formatted_datasets = []
                 
                 for i, dataset in enumerate(selected_datasets):
-                    # Extract detailed metadata
-                    dataset_info = extract_dataset_metadata(dataset)
-                    
-                    # Add to formatted datasets
-                    formatted_datasets.append(f"\n### DATASET {i+1}: {dataset['title'] or dataset['accession']}\n")
-                    formatted_datasets.append(dataset_info)
-                    formatted_datasets.append("\n---\n")
+                    with st.spinner(f"Fetching detailed metadata for dataset {i+1}/{len(selected_datasets)}..."):
+                        # Get detailed metadata using our enhanced function
+                        dataset_info = extract_dataset_metadata(dataset)
+                        
+                        # Add to formatted datasets with proper numbering and spacing
+                        formatted_datasets.append(f"\n### DATASET {i+1}: {dataset['title'] or dataset['accession']}\n")
+                        formatted_datasets.append(dataset_info)
+                        formatted_datasets.append("\n---\n")
                 
+                # Join all dataset information
                 formatted_dataset_text = "".join(formatted_datasets)
                 
-                # Create title & abstract for template
+                # Create title and abstract for template
                 if len(selected_datasets) == 1:
                     title = selected_datasets[0].get("title", "") or f"Dataset {selected_datasets[0]['accession']}"
-                    abstract = selected_datasets[0].get("description", "") or "No abstract available"
+                    abstract = selected_datasets[0].get("description", "") or "No abstract available in dataset metadata"
                 else:
                     title = f"Collection of {len(selected_datasets)} Datasets"
                     abstract = "Multiple datasets selected. See details below."
                 
-                # Create a prompt that forces the correct format
-                prompt = f"""You are an AI assistant specializing in biomedical research datasets. Your task is to answer questions about the provided datasets from ArrayExpress/BioStudies.
+                # Create the prompt with explicit instructions for metadata focus
+                prompt = f"""You are an AI assistant specializing in biomedical research datasets. You are answering questions about ArrayExpress/BioStudies datasets.
 
 TITLE: {title}
 
@@ -481,18 +637,20 @@ QUESTION: {question}
 AVAILABLE DATASETS:
 {formatted_dataset_text}
 
-Based on the above dataset information, please provide a comprehensive, accurate answer to the question. Be specific and refer to details from the datasets when appropriate.
+Based on the detailed dataset information above, which includes publication abstracts, experimental metadata, and file descriptions, provide a comprehensive answer to the question. 
+When addressing metadata specifically, focus on the experimental design, sample information, protocols, and technical details of the dataset itself.
 """
                 
                 # Show debug information
                 with st.expander("Debug: Prompt being sent to LLM", expanded=False):
                     st.text(prompt[:1000] + "..." if len(prompt) > 1000 else prompt)
+                    st.text(f"Total prompt length: {len(prompt)} characters")
                 
-                # Get the response
+                # Get the response with higher max_tokens to allow for detailed answers
                 output = st.session_state.llm.ask(
                     prompt, 
-                    max_tokens=settings.get('max_tokens', 800), 
-                    temperature=settings.get('temperature', 0.3)
+                    max_tokens=settings.get('max_tokens', 1000),  # Increased max tokens
+                    temperature=settings.get('temperature', 0.2)  # Slightly lower temperature for more factual answers
                 )
 
                 # Display the answer

@@ -84,6 +84,12 @@ def handle_schema(schema_file):
     
 def run_pipeline(xml_path, schema_path, ff_model="llama3.1I-8b-q4", similarity_k=5, field_info_to_compare="choices"):
     """Run the profiling pipeline with better text processing"""
+    import re  # Make sure to import re here to avoid the NameError
+    
+    if call_inference is None:
+        st.error("call_inference function could not be imported")
+        return None
+    
     try:
         # Get the schema
         if isinstance(schema_path, str):
@@ -104,8 +110,8 @@ def run_pipeline(xml_path, schema_path, ff_model="llama3.1I-8b-q4", similarity_k
         output = call_inference(
             schema=schema,
             paper_path=xml_path,
-            similarity_k=similarity_k,  # Pass the parameter we added
-            field_info_to_compare=field_info_to_compare,  # Pass the parameter we added
+            similarity_k=similarity_k,
+            field_info_to_compare=field_info_to_compare,
             ff_model=ff_model
         )
         
@@ -118,20 +124,37 @@ def run_pipeline(xml_path, schema_path, ff_model="llama3.1I-8b-q4", similarity_k
                     # Clean each field in the context
                     for field in context:
                         if isinstance(context[field], str):
-                            # Add spaces between words (simple heuristic)
-                            cleaned_text = context[field]
-                            # Replace "convertedFont" markers which appear frequently
-                            cleaned_text = cleaned_text.replace("convertedFont", " ")
-                            # Add space after periods and commas if not followed by space
-                            cleaned_text = re.sub(r'\.(?! )', '. ', cleaned_text)
-                            cleaned_text = re.sub(r',(?! )', ', ', cleaned_text)
-                            # Clean up multiple spaces
-                            cleaned_text = re.sub(r' +', ' ', cleaned_text)
-                            context[field] = cleaned_text
+                            # Start with the original text
+                            text = context[field]
+                            
+                            # Replace convertedFont markers with spaces
+                            text = text.replace("convertedFont", " ")
+                            
+                            # Add space after punctuation if not followed by space
+                            text = re.sub(r'\.(?! )', '. ', text)
+                            text = re.sub(r',(?! )', ', ', text)
+                            text = re.sub(r';(?! )', '; ', text)
+                            
+                            # Fix special characters
+                            text = text.replace("\\u", " ")
+                            text = re.sub(r'([a-z])([A-Z])', r'\1 \2', text)  # Add space between camelCase
+                            
+                            # Clean up multiple spaces and trim
+                            text = re.sub(r' +', ' ', text).strip()
+                            
+                            # Update the context with cleaned text
+                            context[field] = text
+            
             return output
         else:
             st.error("No output generated from pipeline")
             return None
+    
+    except Exception as e:
+        st.error(f"Error running pipeline: {str(e)}")
+        import traceback
+        st.error(traceback.format_exc())
+        return None
     
     except Exception as e:
         st.error(f"Error running pipeline: {str(e)}")
