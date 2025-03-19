@@ -108,6 +108,8 @@ def load_dataset_sample(dataset_files, max_samples=10):
             organism = ""
             study_type = ""
             release_date = ""
+            experimental_factors = ""
+            technology = ""
             
             # Navigate through the ArrayExpress JSON structure
             if isinstance(data, dict):
@@ -129,6 +131,23 @@ def load_dataset_sample(dataset_files, max_samples=10):
                                         organism = attr.get('value', '')
                                     elif attr.get('name') == 'study type':
                                         study_type = attr.get('value', '')
+                                    elif attr.get('name') == 'release date':
+                                        release_date = attr.get('value', '')
+                        
+                        # Look for experimental factors in subsections
+                        if isinstance(section, dict) and 'subsections' in section:
+                            for subsection in section['subsections']:
+                                if isinstance(subsection, dict) and subsection.get('type') == 'samples':
+                                    for attr in subsection.get('attributes', []):
+                                        if isinstance(attr, dict) and attr.get('name') == 'experimental factors':
+                                            experimental_factors = attr.get('value', '')
+                                        
+                                if isinstance(subsection, dict) and subsection.get('type') == 'protocols':
+                                    for subsubsection in subsection.get('subsections', []):
+                                        if isinstance(subsubsection, dict) and 'attributes' in subsubsection:
+                                            for attr in subsubsection['attributes']:
+                                                if attr.get('name') == 'hardware' or attr.get('name') == 'technology':
+                                                    technology = attr.get('value', '')
             
             # Create a dataset object
             dataset = {
@@ -140,7 +159,9 @@ def load_dataset_sample(dataset_files, max_samples=10):
                 "description": description,
                 "organism": organism,
                 "study_type": study_type,
-                "release_date": release_date
+                "release_date": release_date,
+                "experimental_factors": experimental_factors,
+                "technology": technology
             }
             
             datasets.append(dataset)
@@ -217,37 +238,114 @@ def extract_dataset_metadata(dataset):
     if dataset["accession"]:
         metadata.append(f"Accession: {dataset['accession']}")
     
-    if dataset["description"]:
-        # Limit description length
-        desc = dataset["description"]
-        if len(desc) > 200:
-            desc = desc[:200] + "..."
-        metadata.append(f"Description: {desc}")
+    if dataset["pmid"]:
+        metadata.append(f"PMID: {dataset['pmid']}")
     
-    if dataset["organism"]:
-        metadata.append(f"Organism: {dataset['organism']}")
+    # Add all the basic fields we already captured
+    for field in ["description", "organism", "study_type", "experimental_factors", 
+                 "technology", "release_date"]:
+        if dataset.get(field):
+            metadata.append(f"{field.replace('_', ' ').title()}: {dataset[field]}")
     
-    if dataset["study_type"]:
-        metadata.append(f"Study Type: {dataset['study_type']}")
-    
-    # Try to load detailed info from the file
+    # Try to directly read the JSON file
     try:
         with open(dataset["file_path"], 'r') as f:
-            data = json.load(f)
+            json_data = json.loads(f.read())
+        
+        # Extract key information from the JSON structure
+        extracted_data = {}
+        
+        # Extract info from submissions section
+        if 'submissions' in json_data and isinstance(json_data['submissions'], list) and len(json_data['submissions']) > 0:
+            submission = json_data['submissions'][0]
+            if 'title' in submission:
+                extracted_data['Submission Title'] = submission['title']
             
-        # Extract experimental factors if available
-        if 'section' in data:
-            for section in data['section']:
-                if 'subsections' in section:
-                    for subsec in section['subsections']:
-                        if isinstance(subsec, dict) and subsec.get('type') == 'samples':
-                            for attr in subsec.get('attributes', []):
-                                if attr.get('name') == 'experimental factors':
-                                    factors = attr.get('value', '')
-                                    if factors:
-                                        metadata.append(f"Experimental Factors: {factors}")
-    except:
-        pass
+            # Get submitter info
+            if 'submitter' in submission:
+                submitter_info = []
+                for key, value in submission['submitter'].items():
+                    if key in ['firstName', 'lastName', 'email', 'affiliation']:
+                        submitter_info.append(f"{key}: {value}")
+                if submitter_info:
+                    extracted_data['Submitter'] = ", ".join(submitter_info)
+        
+        # Extract section data
+        if 'section' in json_data:
+            for section in json_data['section']:
+                if isinstance(section, dict) and 'type' in section:
+                    section_type = section['type'].title()
+                    
+                    # Extract attributes
+                    if 'attributes' in section:
+                        for attr in section['attributes']:
+                            if isinstance(attr, dict) and 'name' in attr and 'value' in attr:
+                                attr_name = attr['name'].title()
+                                attr_value = attr['value']
+                                key = f"{section_type} - {attr_name}"
+                                extracted_data[key] = attr_value
+                    
+                    # Extract from subsections
+                    if 'subsections' in section:
+                        for subsection in section['subsections']:
+                            if isinstance(subsection, dict) and 'type' in subsection:
+                                subsection_type = subsection['type'].title()
+                                
+                                # Get attributes
+                                if 'attributes' in subsection:
+                                    for attr in subsection['attributes']:
+                                        if isinstance(attr, dict) and 'name' in attr and 'value' in attr:
+                                            attr_name = attr['name'].title()
+                                            attr_value = attr['value']
+                                            key = f"{section_type} - {subsection_type} - {attr_name}"
+                                            extracted_data[key] = attr_value
+        
+        # Add the extracted data to metadata
+        for key, value in extracted_data.items():
+            metadata.append(f"{key}: {value}")
+        
+        # Add an analysis of filled_form data if it exists in an updated_output file
+        # This helps bridge between the Provider and Consumer views
+        output_path = f"updated_output_{os.path.basename(dataset['file_path']).split('___')[0]}.json"
+        if os.path.exists(output_path):
+            try:
+                with open(output_path, 'r') as f:
+                    output_data = json.load(f)
+                
+                if "0" in output_data and "filled_form" in output_data["0"]:
+                    metadata.append("\nPROFILER ANALYSIS:")
+                    for key, value in output_data["0"]["filled_form"].items():
+                        metadata.append(f"  {key.replace('_', ' ').title()}: {value}")
+            except:
+                pass
+    
+    except Exception as e:
+        # Add a fallback extraction that just tries to pull some key fields
+        try:
+            with open(dataset["file_path"], 'r') as f:
+                content = f.read()
+                
+                # Try to find study type
+                study_type_match = re.search(r'"study type"\s*:\s*"([^"]+)"', content)
+                if study_type_match:
+                    metadata.append(f"Study Type: {study_type_match.group(1)}")
+                
+                # Try to find organism
+                organism_match = re.search(r'"organism"\s*:\s*"([^"]+)"', content)
+                if organism_match:
+                    metadata.append(f"Organism: {organism_match.group(1)}")
+                
+                # Try to find experimental designs
+                exp_design_match = re.search(r'"experimental designs"\s*:\s*"([^"]+)"', content)
+                if exp_design_match:
+                    metadata.append(f"Experimental Designs: {exp_design_match.group(1)}")
+                
+                # Try to find hardware
+                hardware_match = re.search(r'"hardware"\s*:\s*"([^"]+)"', content)
+                if hardware_match:
+                    metadata.append(f"Hardware: {hardware_match.group(1)}")
+        except:
+            metadata.append("Error extracting JSON metadata")
     
     return "\n".join(metadata)
 
@@ -348,69 +446,47 @@ def show():
 
         # In the section where you process the user's question:
         if question and st.button("Get Answer"):
-            with st.spinner("Generating answer..."):
-                # Format the datasets for the prompt
-                dataset_info = []
-                for i, ds in enumerate(selected_datasets):
-                    dataset_info.append(f"Dataset {i+1}: {ds['title']}")
+            with st.spinner("Analyzing datasets and generating answer..."):
+                # Format the datasets for the prompt with detailed information
+                formatted_datasets = []
+                
+                for i, dataset in enumerate(selected_datasets):
+                    # Extract detailed metadata
+                    dataset_info = extract_dataset_metadata(dataset)
                     
-                    # Add more details about the dataset
-                    if ds["description"]:
-                        dataset_info.append(f"Description: {ds['description']}")
-                    
-                    if ds["organism"]:
-                        dataset_info.append(f"Organism: {ds['organism']}")
-                        
-                    if ds["study_type"]:
-                        dataset_info.append(f"Study Type: {ds['study_type']}")
-                        
-                    dataset_info.append(f"Accession: {ds['accession']}")
-                    dataset_info.append(f"PMID: {ds['pmid']}")
-                    dataset_info.append("---")
+                    # Add to formatted datasets
+                    formatted_datasets.append(f"\n### DATASET {i+1}: {dataset['title'] or dataset['accession']}\n")
+                    formatted_datasets.append(dataset_info)
+                    formatted_datasets.append("\n---\n")
                 
-                formatted_dataset_text = "\n".join(dataset_info)
+                formatted_dataset_text = "".join(formatted_datasets)
                 
-                # Create a complete context with title/abstract for template placeholders
-                title = ""
-                abstract = ""
-                
-                # If there's just one dataset, use its title as the main title
+                # Create title & abstract for template
                 if len(selected_datasets) == 1:
-                    title = selected_datasets[0]["title"]
-                    abstract = selected_datasets[0]["description"] or "No abstract available"
+                    title = selected_datasets[0].get("title", "") or f"Dataset {selected_datasets[0]['accession']}"
+                    abstract = selected_datasets[0].get("description", "") or "No abstract available"
                 else:
-                    # For multiple datasets, create a summary title
                     title = f"Collection of {len(selected_datasets)} Datasets"
                     abstract = "Multiple datasets selected. See details below."
                 
-                # Prepare the prompt
-                settings = load_settings()
-                
-                # FORCE the correct prompt template regardless of settings
-                prompt_template = """You are an AI assistant specializing in biomedical research datasets. Your task is to answer questions about the provided datasets from ArrayExpress/BioStudies.
+                # Create a prompt that forces the correct format
+                prompt = f"""You are an AI assistant specializing in biomedical research datasets. Your task is to answer questions about the provided datasets from ArrayExpress/BioStudies.
 
-Title: {title}
-Abstract: {abstract}
+TITLE: {title}
 
-Available datasets:
-{datasets}
+ABSTRACT: {abstract}
 
-Question: {question}
+QUESTION: {question}
 
-Please provide a comprehensive, accurate answer based on the dataset information provided above.
+AVAILABLE DATASETS:
+{formatted_dataset_text}
+
+Based on the above dataset information, please provide a comprehensive, accurate answer to the question. Be specific and refer to details from the datasets when appropriate.
 """
                 
-                # Replace all placeholders with actual values
-                prompt = prompt_template.format(
-                    title=title,
-                    abstract=abstract,
-                    question=question,
-                    datasets=formatted_dataset_text
-                )
-                
-                # Debug: Show the prompt being sent
+                # Show debug information
                 with st.expander("Debug: Prompt being sent to LLM", expanded=False):
-                    st.text(prompt)
+                    st.text(prompt[:1000] + "..." if len(prompt) > 1000 else prompt)
                 
                 # Get the response
                 output = st.session_state.llm.ask(

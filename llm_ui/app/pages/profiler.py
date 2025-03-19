@@ -82,13 +82,10 @@ def handle_schema(schema_file):
         st.error(f"Could not import default schema: {str(e)}")
         return None
     
-def run_pipeline(xml_path, schema_path, ff_model="llama3.1I-8b-q4"):
-    """Run the profiling pipeline on the input file"""
-    if call_inference is None:
-        st.error("call_inference function could not be imported")
-        return None
-        
+def run_pipeline(xml_path, schema_path, ff_model="llama3.1I-8b-q4", similarity_k=5, field_info_to_compare="choices"):
+    """Run the profiling pipeline with better text processing"""
     try:
+        # Get the schema
         if isinstance(schema_path, str):
             # Load schema from file
             with open(schema_path, 'r') as f:
@@ -103,22 +100,39 @@ def run_pipeline(xml_path, schema_path, ff_model="llama3.1I-8b-q4"):
         # Run the inference with the specified model
         st.info(f"Using {ff_model} for paper analysis")
         
-        # Call the inference function with the exact model name
+        # Call the inference function with proper parameters
         output = call_inference(
             schema=schema,
             paper_path=xml_path,
-            similarity_k=5,
-            field_info_to_compare="choices",
-            ff_model=ff_model  # Pass the model name directly
+            similarity_k=similarity_k,  # Pass the parameter we added
+            field_info_to_compare=field_info_to_compare,  # Pass the parameter we added
+            ff_model=ff_model
         )
-            
-        # Get the first paper's data
+        
+        # Check and clean up the output - this helps fix garbled context
         if output and len(output) > 0:
+            # Check if we need to clean context sections
+            for key in output:
+                if isinstance(output[key], dict) and "context" in output[key]:
+                    context = output[key]["context"]
+                    # Clean each field in the context
+                    for field in context:
+                        if isinstance(context[field], str):
+                            # Add spaces between words (simple heuristic)
+                            cleaned_text = context[field]
+                            # Replace "convertedFont" markers which appear frequently
+                            cleaned_text = cleaned_text.replace("convertedFont", " ")
+                            # Add space after periods and commas if not followed by space
+                            cleaned_text = re.sub(r'\.(?! )', '. ', cleaned_text)
+                            cleaned_text = re.sub(r',(?! )', ', ', cleaned_text)
+                            # Clean up multiple spaces
+                            cleaned_text = re.sub(r' +', ' ', cleaned_text)
+                            context[field] = cleaned_text
             return output
         else:
             st.error("No output generated from pipeline")
             return None
-            
+    
     except Exception as e:
         st.error(f"Error running pipeline: {str(e)}")
         import traceback
