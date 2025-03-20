@@ -149,7 +149,29 @@ def load_dataset_sample(dataset_files, max_samples=10):
                                                 if attr.get('name') == 'hardware' or attr.get('name') == 'technology':
                                                     technology = attr.get('value', '')
             
-            # Create a dataset object
+            # If we don't have a good title, try to fetch it from PubMed
+            if not title or title.strip() == "" or title.startswith("Dataset E-"):
+                try:
+                    if pmid and pmid != "unknown":
+                        import requests
+                        from xml.etree import ElementTree as ET
+                        
+                        pubmed_url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id={pmid}&retmode=xml"
+                        
+                        response = requests.get(pubmed_url, timeout=5)
+                        if response.status_code == 200:
+                            root = ET.fromstring(response.text)
+                            
+                            # Extract article title from PubMed
+                            article_title = root.find(".//ArticleTitle")
+                            if article_title is not None and article_title.text:
+                                title = article_title.text
+                except Exception as e:
+                    # If PubMed lookup fails, use accession as title
+                    if not title:
+                        title = f"Dataset {accession}"
+            
+            # Create a dataset object with improved title
             dataset = {
                 "title": title or f"Dataset {accession}",
                 "accession": accession,
@@ -525,6 +547,60 @@ def filter_datasets(datasets, search_term):
     
     return filtered
 
+def fetch_all_pubmed_titles(datasets):
+    """Fetch all PubMed titles in bulk to improve display efficiency"""
+    import requests
+    from xml.etree import ElementTree as ET
+    
+    # Get all PMIDs that need titles
+    pmids_to_fetch = []
+    pmid_indices = {}  # Map PMIDs to dataset indices
+    
+    for i, dataset in enumerate(datasets):
+        if dataset.get("pmid") and dataset["pmid"] != "unknown":
+            # Only fetch if title is missing or generic
+            if not dataset.get("title") or dataset["title"].startswith("Dataset E-"):
+                pmids_to_fetch.append(dataset["pmid"])
+                pmid_indices[dataset["pmid"]] = i
+    
+    if not pmids_to_fetch:
+        return datasets  # No titles to fetch
+    
+    # Split into batches of 50 to avoid overloading PubMed API
+    batch_size = 50
+    batches = [pmids_to_fetch[i:i+batch_size] for i in range(0, len(pmids_to_fetch), batch_size)]
+    
+    for batch in batches:
+        try:
+            # Create a comma-separated list of PMIDs
+            pmid_list = ",".join(batch)
+            
+            # Fetch data from PubMed for this batch
+            pubmed_url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id={pmid_list}&retmode=xml"
+            response = requests.get(pubmed_url, timeout=15)
+            
+            if response.status_code == 200:
+                root = ET.fromstring(response.text)
+                
+                # Process each PubMedArticle element
+                for article in root.findall(".//PubmedArticle"):
+                    # Get the PMID
+                    pmid_elem = article.find(".//PMID")
+                    if pmid_elem is not None and pmid_elem.text:
+                        pmid = pmid_elem.text
+                        
+                        # If this PMID is in our list, extract the title
+                        if pmid in pmid_indices:
+                            article_title = article.find(".//ArticleTitle")
+                            if article_title is not None and article_title.text:
+                                # Update the dataset's title
+                                datasets[pmid_indices[pmid]]["title"] = article_title.text
+        except Exception as e:
+            print(f"Error fetching batch of PubMed titles: {e}")
+            continue
+    
+    return datasets
+
 def show():
     st.title("ArrayExpress Dataset Explorer & Q&A")
     
@@ -551,9 +627,17 @@ def show():
                 if not dataset_files:
                     st.error("No ArrayExpress dataset files found. Please check your data directory.")
                     st.stop()
-                    
-                st.session_state.datasets = load_dataset_sample(dataset_files, max_samples=50)
+                
+                # Allow user to specify how many datasets to load
+                max_datasets = st.slider("Number of datasets to load:", min_value=10, max_value=200, value=50, step=10)
+                st.session_state.datasets = load_dataset_sample(dataset_files, max_samples=max_datasets)
                 save_cached_datasets(st.session_state.datasets)
+
+        # Add this new section to fetch all titles at once
+        with st.spinner("Fetching publication titles..."):
+            st.session_state.datasets = fetch_all_pubmed_titles(st.session_state.datasets)
+            # Update the cached datasets with the improved titles
+            save_cached_datasets(st.session_state.datasets)
     
     # Dataset search and filtering
     st.header("Browse ArrayExpress Datasets")
@@ -563,19 +647,66 @@ def show():
     
     st.write(f"Found {len(filtered_datasets)} matching datasets")
     
-    # Display datasets in an expander
+    # Implement pagination for datasets
+    st.subheader("Browse Datasets")
+    datasets_per_page = 10
+    total_pages = (len(filtered_datasets) + datasets_per_page - 1) // datasets_per_page
+
+    # Create columns for navigation
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col1:
+        if 'current_page' not in st.session_state:
+            st.session_state.current_page = 0
+        if st.button("Previous", disabled=st.session_state.current_page == 0):
+            st.session_state.current_page -= 1
+            
+    with col2:
+        st.write(f"Page {st.session_state.current_page + 1} of {max(1, total_pages)}")
+        
+    with col3:
+        if st.button("Next", disabled=st.session_state.current_page >= total_pages - 1):
+            st.session_state.current_page += 1
+
+    # Calculate page start and end
+    start_idx = st.session_state.current_page * datasets_per_page
+    end_idx = min(start_idx + datasets_per_page, len(filtered_datasets))
+
+    # Display only the current page of datasets
     with st.expander("Available Datasets", expanded=True):
-        for i, dataset in enumerate(filtered_datasets):
-            col1, col2 = st.columns([8, 2])
+        for i in range(start_idx, end_idx):
+            dataset = filtered_datasets[i]
+            col1, col2, col3 = st.columns([6, 3, 1])
+            
             with col1:
-                st.markdown(f"**{i+1}. [{dataset['title'] or dataset['accession']}]({dataset['url']})**")
+                # Better title display
+                title = dataset['title'] or f"Dataset {dataset['accession']}"
+                st.markdown(f"**{i+1}. [{title}]({dataset['url']})**")
+                
+                # Show a snippet of description if available
                 if dataset['description']:
-                    st.write(dataset['description'][:100] + "..." if len(dataset['description']) > 100 else dataset['description'])
+                    desc = dataset['description'][:100] + "..." if len(dataset['description']) > 100 else dataset['description']
+                    st.write(desc)
+            
             with col2:
+                # Show key metadata that helps identify the dataset
+                metadata = []
+                if dataset.get('organism'):
+                    metadata.append(f"Organism: {dataset['organism']}")
+                if dataset.get('study_type'):
+                    metadata.append(f"Study type: {dataset['study_type']}")
+                if metadata:
+                    st.write("\n".join(metadata))
+                st.write(f"Accession: {dataset['accession']}")
+            
+            with col3:
+                # Selection checkbox
                 dataset_key = f"select_dataset_{i}"
                 if dataset_key not in st.session_state:
                     st.session_state[dataset_key] = False
                 st.session_state[dataset_key] = st.checkbox("Select", key=f"cb_{i}", value=st.session_state[dataset_key])
+            
+            # Add a separator between entries
+            st.markdown("---")
     
     # Get selected datasets
     selected_datasets = [
@@ -584,22 +715,94 @@ def show():
     ]
     
     # Q&A section
-    st.header("Ask Questions About Selected Datasets")
-    
+    st.header("Ask Questions About Selected Datasets", divider="gray")
+
     if not selected_datasets:
         st.info("Please select at least one dataset to ask questions about.")
     else:
-        # Show selected datasets
+        # Show selected datasets in a more compact way
         st.subheader(f"Selected Datasets ({len(selected_datasets)})")
-        for ds in selected_datasets:
-            st.markdown(f"- **{ds['title'] or ds['accession']}**")
         
-        # Get a question from the user
-        question = st.text_area("Enter your question about these datasets:", height=100)
-        settings = load_settings()
+        # Display selected datasets in a more compact grid
+        cols = st.columns(3)
+        for i, ds in enumerate(selected_datasets):
+            col_idx = i % 3
+            with cols[col_idx]:
+                st.markdown(f"- **{ds['title'] or ds['accession']}**")
+        
+        # Add a divider
+        st.markdown("---")
+        
+        # Simple question section
+        st.subheader("Quick Question")
+        
+        # Setup clearing mechanism
+        if "clear_requested" not in st.session_state:
+            st.session_state.clear_requested = False
 
+        if st.session_state.clear_requested:
+            st.session_state.clear_requested = False
+            st.session_state.question_input = ""
+        
+        # Create two columns for the question input
+        q_col1, q_col2 = st.columns([4, 1])
+        
+        with q_col1:
+            question = st.text_input("Enter your question:", 
+                                    placeholder="Example: What organism was studied?",
+                                    key="question_input")
+        
+        with q_col2:
+            if st.button("🧹 Clear", key="clear_question"):
+                st.session_state.clear_requested = True
+                st.rerun()
+        
+        # Button for the simple question
+        if question:
+            # Center the button with columns
+            _, btn_col, _ = st.columns([1, 2, 1])
+            with btn_col:
+                simple_submit = st.button("📝 Get Answer", key="get_answer_btn", use_container_width=True)
+        else:
+            simple_submit = False
+        
+        # Advanced question section
+        with st.expander("💬 Need to ask a more detailed question?"):
+            # Setup clearing mechanism
+            if "clear_complex_requested" not in st.session_state:
+                st.session_state.clear_complex_requested = False
+                
+            if st.session_state.clear_complex_requested:
+                st.session_state.clear_complex_requested = False
+                st.session_state.complex_question_input = ""
+            
+            complex_question = st.text_area("Enter your detailed question:", 
+                                        height=150,
+                                        placeholder="Enter a more complex question that requires multiple paragraphs of explanation...",
+                                        key="complex_question_input")
+            
+            # Layout with two columns for buttons
+            adv_col1, adv_col2 = st.columns([1, 1])
+            
+            with adv_col1:
+                if st.button("🧹 Clear", key="clear_complex_question"):
+                    st.session_state.clear_complex_requested = True
+                    st.experimental_rerun()
+            
+            with adv_col2:
+                complex_submit = st.button("📝 Get Answer", key="get_complex_answer_btn")
+        
+        # Process questions - first check complex, then simple
+        get_answer = False
+        if 'complex_submit' in locals() and complex_submit and complex_question:
+            question = complex_question
+            get_answer = True
+        elif 'simple_submit' in locals() and simple_submit and question:
+            get_answer = True
+        
         # In the section where you process the user's question:
-        if question and st.button("Get Answer"):
+        if get_answer:
+            st.markdown("---")
             with st.spinner("Analyzing datasets and generating answer..."):
                 # Format the datasets for the prompt with detailed metadata
                 formatted_datasets = []
@@ -647,6 +850,7 @@ When addressing metadata specifically, focus on the experimental design, sample 
                     st.text(f"Total prompt length: {len(prompt)} characters")
                 
                 # Get the response with higher max_tokens to allow for detailed answers
+                settings = load_settings()
                 output = st.session_state.llm.ask(
                     prompt, 
                     max_tokens=settings.get('max_tokens', 1000),  # Increased max tokens
