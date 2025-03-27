@@ -629,16 +629,23 @@ def show():
     # Show selected datasets in a more compact way
     st.subheader(f"Selected Datasets ({len(selected_datasets)})")
     
-    # Display selected datasets in a more compact grid
+    # Display selected datasets as a grid with icons
     cols = st.columns(3)
     for i, ds in enumerate(selected_datasets):
         col_idx = i % 3
         with cols[col_idx]:
-            st.markdown(f"- **{ds['title'] or ds['accession']}**")
-    
-    # Add a divider
+            title = ds['title'] or ds['accession']
+            if len(title) > 40:
+                title = title[:40] + "..."
+            st.markdown(f"📊 **{title}**")
+
+    # Add styling to the question area
     st.markdown("---")
-    
+    st.subheader("Ask a Question")
+
+    # Add a simple hint
+    st.markdown("*Ask anything about the selected datasets - experimental design, organisms, methods, etc.*")
+
     # Simple question section
     st.subheader("Quick Question")
     

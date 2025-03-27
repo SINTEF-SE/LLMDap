@@ -64,16 +64,29 @@ def show():
     tab1, tab2 = st.tabs(["Process Papers", "Chat with LLM"])
 
     with tab1:
-        st.subheader("Upload a scientific paper (.xml) or provide a URL")
-
-        uploaded_file = st.file_uploader("Choose an .xml file", type=["xml"], key="xml_uploader")
-        xml_url = st.text_input("Or provide a URL to an .xml file")
-
-        # Optional schema file upload
-        st.subheader("Upload an optional schema file (JSON)")
-        schema_file = st.file_uploader("Choose a JSON schema file", type=["json"], key="json_uploader")
+        st.subheader("Process a Scientific Paper")
         
-        # Model selection for processing
+        # Add a nice description
+        st.markdown("*Upload an XML paper file or provide a URL to analyze the dataset described in the paper.*")
+        
+        # Create a visually distinct upload area
+        with st.container():
+            st.markdown("##### Upload a scientific paper (.xml) or provide a URL")
+            uploaded_file = st.file_uploader("Choose an .xml file", type=["xml"], key="xml_uploader")
+            
+            # Add a divider between upload and URL
+            if not uploaded_file:
+                st.markdown("*OR*")
+                xml_url = st.text_input("Provide a URL to an .xml file")
+        
+        # Make the schema upload section more distinct
+        with st.container():
+            st.markdown("##### Schema Configuration")
+            st.markdown("*Optional: Upload a custom schema file to define the structure for extraction*")
+            schema_file = st.file_uploader("Choose a JSON schema file", type=["json"], key="json_uploader")
+        
+        # Make the model selection more visually distinct
+        st.markdown("##### Model Selection")
         processing_model = st.radio(
             "Select model for paper processing:",
             ["OpenAI GPT-4o (faster, more accurate)", "Local Llama (slower, no API costs)"],
@@ -81,8 +94,9 @@ def show():
             index=1  # Default to local model
         )
 
-        # Run pipeline button
-        if st.button("Run pipeline"):
+        # Add a clearer button
+        st.markdown("---")
+        if st.button("▶️ Run Pipeline", use_container_width=True):
             with st.spinner("Running the pipeline... Please wait."):
                 xml_path = handle_input(uploaded_file, xml_url)
 
