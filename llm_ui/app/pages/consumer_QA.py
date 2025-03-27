@@ -602,7 +602,7 @@ def fetch_all_pubmed_titles(datasets):
     return datasets
 
 def show():
-    st.title("ArrayExpress Dataset Explorer & Q&A")
+    st.title("Dataset Q&A")
     
     # Initialize LLM if not already in session state
     if 'llm' not in st.session_state:
@@ -614,222 +614,128 @@ def show():
             st.error(f"Error initializing LLM: {str(e)}")
             st.stop()
     
-    # Try to load cached datasets first
-    if 'datasets' not in st.session_state:
-        cached_datasets = load_cached_datasets()
-        if (cached_datasets):
-            st.session_state.datasets = cached_datasets
-        else:
-            # Find dataset files
-            with st.spinner("Searching for ArrayExpress datasets..."):
-                dataset_files = find_dataset_files()
-                
-                if not dataset_files:
-                    st.error("No ArrayExpress dataset files found. Please check your data directory.")
-                    st.stop()
-                
-                # Allow user to specify how many datasets to load
-                max_datasets = st.slider("Number of datasets to load:", min_value=10, max_value=200, value=50, step=10)
-                st.session_state.datasets = load_dataset_sample(dataset_files, max_samples=max_datasets)
-                save_cached_datasets(st.session_state.datasets)
-
-        # Add this new section to fetch all titles at once
-        with st.spinner("Fetching publication titles..."):
-            st.session_state.datasets = fetch_all_pubmed_titles(st.session_state.datasets)
-            # Update the cached datasets with the improved titles
-            save_cached_datasets(st.session_state.datasets)
-    
-    # Dataset search and filtering
-    st.header("Browse ArrayExpress Datasets")
-    
-    search_term = st.text_input("Search datasets:", "")
-    filtered_datasets = filter_datasets(st.session_state.datasets, search_term)
-    
-    st.write(f"Found {len(filtered_datasets)} matching datasets")
-    
-    # Implement pagination for datasets
-    st.subheader("Browse Datasets")
-    datasets_per_page = 10
-    total_pages = (len(filtered_datasets) + datasets_per_page - 1) // datasets_per_page
-
-    # Create columns for navigation
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col1:
-        if 'current_page' not in st.session_state:
-            st.session_state.current_page = 0
-        if st.button("Previous", disabled=st.session_state.current_page == 0):
-            st.session_state.current_page -= 1
-            
-    with col2:
-        st.write(f"Page {st.session_state.current_page + 1} of {max(1, total_pages)}")
+    # Check if we have selected datasets from the Datasets page
+    if 'selected_datasets' not in st.session_state or not st.session_state.selected_datasets:
+        st.warning("No datasets selected. Please select datasets in the Dataset Browser first.")
         
-    with col3:
-        if st.button("Next", disabled=st.session_state.current_page >= total_pages - 1):
-            st.session_state.current_page += 1
-
-    # Calculate page start and end
-    start_idx = st.session_state.current_page * datasets_per_page
-    end_idx = min(start_idx + datasets_per_page, len(filtered_datasets))
-
-    # Display only the current page of datasets
-    with st.expander("Available Datasets", expanded=True):
-        for i in range(start_idx, end_idx):
-            dataset = filtered_datasets[i]
-            col1, col2, col3 = st.columns([6, 3, 1])
-            
-            with col1:
-                # Better title display
-                title = dataset['title'] or f"Dataset {dataset['accession']}"
-                st.markdown(f"**{i+1}. [{title}]({dataset['url']})**")
-                
-                # Show a snippet of description if available
-                if dataset['description']:
-                    desc = dataset['description'][:100] + "..." if len(dataset['description']) > 100 else dataset['description']
-                    st.write(desc)
-            
-            with col2:
-                # Show key metadata that helps identify the dataset
-                metadata = []
-                if dataset.get('organism'):
-                    metadata.append(f"Organism: {dataset['organism']}")
-                if dataset.get('study_type'):
-                    metadata.append(f"Study type: {dataset['study_type']}")
-                if metadata:
-                    st.write("\n".join(metadata))
-                st.write(f"Accession: {dataset['accession']}")
-            
-            with col3:
-                # Selection checkbox
-                dataset_key = f"select_dataset_{i}"
-                if dataset_key not in st.session_state:
-                    st.session_state[dataset_key] = False
-                st.session_state[dataset_key] = st.checkbox("Select", key=f"cb_{i}", value=st.session_state[dataset_key])
-            
-            # Add a separator between entries
-            st.markdown("---")
+        # Add a button to navigate to the Datasets page
+        if st.button("Go to Dataset Browser"):
+            st.session_state.show_page = "Dataset Browser"
+            st.rerun()
+        return
     
-    # Get selected datasets
-    selected_datasets = [
-        dataset for i, dataset in enumerate(filtered_datasets) 
-        if st.session_state.get(f"select_dataset_{i}", False)
-    ]
+    selected_datasets = st.session_state.selected_datasets
     
-    # Q&A section
-    st.header("Ask Questions About Selected Datasets", divider="gray")
+    # Show selected datasets in a more compact way
+    st.subheader(f"Selected Datasets ({len(selected_datasets)})")
+    
+    # Display selected datasets in a more compact grid
+    cols = st.columns(3)
+    for i, ds in enumerate(selected_datasets):
+        col_idx = i % 3
+        with cols[col_idx]:
+            st.markdown(f"- **{ds['title'] or ds['accession']}**")
+    
+    # Add a divider
+    st.markdown("---")
+    
+    # Simple question section
+    st.subheader("Quick Question")
+    
+    # Setup clearing mechanism
+    if "clear_requested" not in st.session_state:
+        st.session_state.clear_requested = False
 
-    if not selected_datasets:
-        st.info("Please select at least one dataset to ask questions about.")
+    if st.session_state.clear_requested:
+        st.session_state.clear_requested = False
+        st.session_state.question_input = ""
+    
+    # Create two columns for the question input
+    q_col1, q_col2 = st.columns([4, 1])
+    
+    with q_col1:
+        question = st.text_input("Enter your question:", 
+                                placeholder="Example: What organism was studied?",
+                                key="question_input")
+    
+    with q_col2:
+        if st.button("🧹 Clear", key="clear_question"):
+            st.session_state.clear_requested = True
+            st.rerun()
+    
+    # Button for the simple question
+    if question:
+        # Center the button with columns
+        _, btn_col, _ = st.columns([1, 2, 1])
+        with btn_col:
+            simple_submit = st.button("📝 Get Answer", key="get_answer_btn", use_container_width=True)
     else:
-        # Show selected datasets in a more compact way
-        st.subheader(f"Selected Datasets ({len(selected_datasets)})")
-        
-        # Display selected datasets in a more compact grid
-        cols = st.columns(3)
-        for i, ds in enumerate(selected_datasets):
-            col_idx = i % 3
-            with cols[col_idx]:
-                st.markdown(f"- **{ds['title'] or ds['accession']}**")
-        
-        # Add a divider
-        st.markdown("---")
-        
-        # Simple question section
-        st.subheader("Quick Question")
-        
+        simple_submit = False
+    
+    # Advanced question section
+    with st.expander("💬 Need to ask a more detailed question?"):
         # Setup clearing mechanism
-        if "clear_requested" not in st.session_state:
-            st.session_state.clear_requested = False
-
-        if st.session_state.clear_requested:
-            st.session_state.clear_requested = False
-            st.session_state.question_input = ""
-        
-        # Create two columns for the question input
-        q_col1, q_col2 = st.columns([4, 1])
-        
-        with q_col1:
-            question = st.text_input("Enter your question:", 
-                                    placeholder="Example: What organism was studied?",
-                                    key="question_input")
-        
-        with q_col2:
-            if st.button("🧹 Clear", key="clear_question"):
-                st.session_state.clear_requested = True
-                st.rerun()
-        
-        # Button for the simple question
-        if question:
-            # Center the button with columns
-            _, btn_col, _ = st.columns([1, 2, 1])
-            with btn_col:
-                simple_submit = st.button("📝 Get Answer", key="get_answer_btn", use_container_width=True)
-        else:
-            simple_submit = False
-        
-        # Advanced question section
-        with st.expander("💬 Need to ask a more detailed question?"):
-            # Setup clearing mechanism
-            if "clear_complex_requested" not in st.session_state:
-                st.session_state.clear_complex_requested = False
-                
-            if st.session_state.clear_complex_requested:
-                st.session_state.clear_complex_requested = False
-                st.session_state.complex_question_input = ""
+        if "clear_complex_requested" not in st.session_state:
+            st.session_state.clear_complex_requested = False
             
-            complex_question = st.text_area("Enter your detailed question:", 
-                                        height=150,
-                                        placeholder="Enter a more complex question that requires multiple paragraphs of explanation...",
-                                        key="complex_question_input")
-            
-            # Layout with two columns for buttons
-            adv_col1, adv_col2 = st.columns([1, 1])
-            
-            with adv_col1:
-                if st.button("🧹 Clear", key="clear_complex_question"):
-                    st.session_state.clear_complex_requested = True
-                    st.experimental_rerun()
-            
-            with adv_col2:
-                complex_submit = st.button("📝 Get Answer", key="get_complex_answer_btn")
+        if st.session_state.clear_complex_requested:
+            st.session_state.clear_complex_requested = False
+            st.session_state.complex_question_input = ""
         
-        # Process questions - first check complex, then simple
-        get_answer = False
-        if 'complex_submit' in locals() and complex_submit and complex_question:
-            question = complex_question
-            get_answer = True
-        elif 'simple_submit' in locals() and simple_submit and question:
-            get_answer = True
+        complex_question = st.text_area("Enter your detailed question:", 
+                                    height=150,
+                                    placeholder="Enter a more complex question that requires multiple paragraphs of explanation...",
+                                    key="complex_question_input")
         
-        # In the section where you process the user's question:
-        if get_answer:
-            st.markdown("---")
-            with st.spinner("Analyzing datasets and generating answer..."):
-                # Format the datasets for the prompt with detailed metadata
-                formatted_datasets = []
-                
-                for i, dataset in enumerate(selected_datasets):
-                    with st.spinner(f"Fetching detailed metadata for dataset {i+1}/{len(selected_datasets)}..."):
-                        # Get detailed metadata using our enhanced function
-                        dataset_info = extract_dataset_metadata(dataset)
-                        
-                        # Add to formatted datasets with proper numbering and spacing
-                        formatted_datasets.append(f"\n### DATASET {i+1}: {dataset['title'] or dataset['accession']}\n")
-                        formatted_datasets.append(dataset_info)
-                        formatted_datasets.append("\n---\n")
-                
-                # Join all dataset information
-                formatted_dataset_text = "".join(formatted_datasets)
-                
-                # Create title and abstract for template
-                if len(selected_datasets) == 1:
-                    title = selected_datasets[0].get("title", "") or f"Dataset {selected_datasets[0]['accession']}"
-                    abstract = selected_datasets[0].get("description", "") or "No abstract available in dataset metadata"
-                else:
-                    title = f"Collection of {len(selected_datasets)} Datasets"
-                    abstract = "Multiple datasets selected. See details below."
-                
-                # Create the prompt with explicit instructions for metadata focus
-                prompt = f"""You are an AI assistant specializing in biomedical research datasets. You are answering questions about ArrayExpress/BioStudies datasets.
+        # Layout with two columns for buttons
+        adv_col1, adv_col2 = st.columns([1, 1])
+        
+        with adv_col1:
+            if st.button("🧹 Clear", key="clear_complex_question"):
+                st.session_state.clear_complex_requested = True
+                st.experimental_rerun()
+        
+        with adv_col2:
+            complex_submit = st.button("📝 Get Answer", key="get_complex_answer_btn")
+    
+    # Process questions - first check complex, then simple
+    get_answer = False
+    if 'complex_submit' in locals() and complex_submit and complex_question:
+        question = complex_question
+        get_answer = True
+    elif 'simple_submit' in locals() and simple_submit and question:
+        get_answer = True
+    
+    # In the section where you process the user's question:
+    if get_answer:
+        st.markdown("---")
+        with st.spinner("Analyzing datasets and generating answer..."):
+            # Format the datasets for the prompt with detailed metadata
+            formatted_datasets = []
+            
+            for i, dataset in enumerate(selected_datasets):
+                with st.spinner(f"Fetching detailed metadata for dataset {i+1}/{len(selected_datasets)}..."):
+                    # Get detailed metadata using our enhanced function
+                    dataset_info = extract_dataset_metadata(dataset)
+                    
+                    # Add to formatted datasets with proper numbering and spacing
+                    formatted_datasets.append(f"\n### DATASET {i+1}: {dataset['title'] or dataset['accession']}\n")
+                    formatted_datasets.append(dataset_info)
+                    formatted_datasets.append("\n---\n")
+            
+            # Join all dataset information
+            formatted_dataset_text = "".join(formatted_datasets)
+            
+            # Create title and abstract for template
+            if len(selected_datasets) == 1:
+                title = selected_datasets[0].get("title", "") or f"Dataset {selected_datasets[0]['accession']}"
+                abstract = selected_datasets[0].get("description", "") or "No abstract available in dataset metadata"
+            else:
+                title = f"Collection of {len(selected_datasets)} Datasets"
+                abstract = "Multiple datasets selected. See details below."
+            
+            # Create the prompt with explicit instructions for metadata focus
+            prompt = f"""You are an AI assistant specializing in biomedical research datasets. You are answering questions about ArrayExpress/BioStudies datasets.
 
 TITLE: {title}
 
@@ -843,28 +749,28 @@ AVAILABLE DATASETS:
 Based on the detailed dataset information above, which includes publication abstracts, experimental metadata, and file descriptions, provide a comprehensive answer to the question. 
 When addressing metadata specifically, focus on the experimental design, sample information, protocols, and technical details of the dataset itself.
 """
-                
-                # Show debug information
-                with st.expander("Debug: Prompt being sent to LLM", expanded=False):
-                    st.text(prompt[:1000] + "..." if len(prompt) > 1000 else prompt)
-                    st.text(f"Total prompt length: {len(prompt)} characters")
-                
-                # Get the response with higher max_tokens to allow for detailed answers
-                settings = load_settings()
-                output = st.session_state.llm.ask(
-                    prompt, 
-                    max_tokens=settings.get('max_tokens', 1000),  # Increased max tokens
-                    temperature=settings.get('temperature', 0.2)  # Slightly lower temperature for more factual answers
-                )
+            
+            # Show debug information
+            with st.expander("Debug: Prompt being sent to LLM", expanded=False):
+                st.text(prompt[:1000] + "..." if len(prompt) > 1000 else prompt)
+                st.text(f"Total prompt length: {len(prompt)} characters")
+            
+            # Get the response with higher max_tokens to allow for detailed answers
+            settings = load_settings()
+            output = st.session_state.llm.ask(
+                prompt, 
+                max_tokens=settings.get('max_tokens', 1000),  # Increased max tokens
+                temperature=settings.get('temperature', 0.2)  # Slightly lower temperature for more factual answers
+            )
 
-                # Display the answer
-                st.subheader("Answer:")
-                st.markdown(output)
+            # Display the answer
+            st.subheader("Answer:")
+            st.markdown(output)
     
     # Debug information
     with st.expander("Debug Information", expanded=False):
         st.write(f"Total datasets found: {len(st.session_state.datasets)}")
-        st.write(f"Filtered datasets: {len(filtered_datasets)}")
+        st.write(f"Selected datasets: {len(st.session_state.selected_datasets)}")
         st.write(f"Selected datasets: {len(selected_datasets)}")
         
         if os.path.exists("cached_datasets.json"):

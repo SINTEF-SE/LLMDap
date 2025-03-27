@@ -13,39 +13,97 @@ sys.path.append(profiler_dir)
 # Configure Streamlit page
 st.set_page_config(page_title="UPCAST Profiler", page_icon=":bar_chart:", layout="wide")
 
-# Your homepage content here
-st.title("UPCAST Profiler")
-st.write("Welcome to the UPCAST Profiler! Use the sidebar to navigate to different pages.")
+# Stabilize the sidebar
+st.markdown("""
+<style>
+    [data-testid="stSidebar"] {
+        min-width: 200px;
+        max-width: 300px;
+    }
+</style>
+""", unsafe_allow_html=True)
 
-# Import pages with relative imports
-from pages import home, configure, profiler, provider
+# IMPORTANT: Print current directory and check file existence
+print(f"Current directory: {os.getcwd()}")
+print(f"Pages directory content: {os.listdir(os.path.join(os.path.dirname(__file__), 'pages'))}")
 
-# Check if consumer_QA.py exists and import it if present
-consumer_qa_exists = os.path.exists(os.path.join(os.path.dirname(__file__), 'pages', 'consumer_QA.py'))
-if consumer_qa_exists:
-    from pages import consumer_QA
+# Use consistent imports for all pages
+from llm_ui.app.pages import home, configure, profiler, provider, datasets, consumer_QA
 
 def main():
-    # Sidebar for navigation
-    pages = ["Home", "Configure", "Profiler", "Provider"]
+    # Initialize session state variables
+    if 'nav_page' not in st.session_state:
+        st.session_state.nav_page = "Home"
     
-    # Add Consumer QA to navigation if it exists
-    if consumer_qa_exists:
-        pages.append("Consumer Q&A")
+    # Create a consistent container for the sidebar
+    sidebar = st.sidebar.container()
     
-    page = st.sidebar.selectbox("Select Page", pages)
-
-    if page == "Home":
-        home.show()
-    elif page == "Configure":
-        configure.show()
-    elif page == "Profiler":
-        profiler.show()
-    elif page == "Provider":
-        provider.show()
-    elif page == "Consumer Q&A" and consumer_qa_exists:
-        consumer_QA.show()
+    with sidebar:
+        st.title("Navigation")
+        
+        # debug information
+        with st.expander("Debug Info", expanded=False):
+            st.write("Session state keys:", list(st.session_state.keys()))
+            if 'show_page' in st.session_state:
+                st.write("Pending page switch:", st.session_state.show_page)
+            if 'selected_datasets' in st.session_state:
+                st.write("Selected datasets:", len(st.session_state.selected_datasets))
+            if 'nav_page' in st.session_state:
+                st.write("Current sidebar selection:", st.session_state.nav_page)
+        
+        # Define available pages 
+        pages = {
+            "Home": home.show,
+            "Dataset Browser": datasets.show,  
+            "Consumer Q&A": consumer_QA.show,  
+            "Provider": provider.show,
+            "Profiler": profiler.show,
+            "Configure": configure.show
+        }
+        
+        # Check if we need to navigate to a new page first
+        if 'show_page' in st.session_state:
+            requested_page = st.session_state.show_page
+            if requested_page in pages:
+                # Update the nav_page immediately
+                st.session_state.nav_page = requested_page
+                # Clear the temporary navigation state
+                del st.session_state.show_page
+                # Force rerun to refresh the UI with the new page
+                st.rerun()
+        
+        # Default to Home if no page is selected
+        default_page = "Home"
+        
+        # Use the saved selection if available 
+        if 'nav_page' in st.session_state and st.session_state.nav_page in pages:
+            default_page = st.session_state.nav_page
+        
+        # Get the page index for the selectbox
+        page_options = list(pages.keys())
+        try:
+            default_index = page_options.index(default_page)
+        except (ValueError, KeyError):
+            default_index = 0
+        
+        # Create the sidebar selectbox 
+        current_page = st.selectbox(
+            "Select Page", 
+            page_options,
+            index=default_index,
+            key="page_selectbox"
+        )
+        
+        # Check if the selection has changed
+        if current_page != st.session_state.nav_page:
+            st.session_state.nav_page = current_page
+            st.rerun()
+    
+    # Display the current page
+    pages[st.session_state.nav_page]()
 
 if __name__ == "__main__":
+    print("Project root:", project_root)
+    print("Profiler directory:", profiler_dir)
     main()
 

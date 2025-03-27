@@ -57,6 +57,9 @@ def show():
     if 'json_text' not in st.session_state:
         st.session_state.json_text = {}
 
+    if 'active_tab' not in st.session_state:
+        st.session_state.active_tab = 0
+
     # Create tabs for different functionalities
     tab1, tab2 = st.tabs(["Process Papers", "Chat with LLM"])
 
@@ -172,10 +175,34 @@ def show():
                             "full_output": output_json
                         }
                         
-                        # Success message
-                        st.success(f"Paper processed successfully! You can now chat with the LLM about this paper.")
-                else:
-                    st.error("Failed to process the input. Please check your file or URL.")
+                        # Success message and action buttons in columns
+                        st.success(f"Paper processed successfully!")
+                        
+                        # Create two columns for the action buttons
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            # Save button
+                            if st.button("💾 Save Output", key=f"save_btn_direct_{paper_id}"):
+                                try:
+                                    # Save to a file with paper ID in the filename
+                                    output_path = f"updated_output_{paper_id}.json"
+                                    with open(output_path, "w") as f:
+                                        f.write(st.session_state.json_text[paper_id])
+                                    st.success(f"Output saved to {output_path}!")
+                                except Exception as e:
+                                    st.error(f"Error saving file: {str(e)}")
+                        
+                        with col2:
+                            # Chat button that changes the active tab
+                            if 'active_tab' not in st.session_state:
+                                st.session_state.active_tab = 0
+                                
+                            if st.button("💬 Chat with LLM", key=f"chat_btn_{paper_id}"):
+                                st.session_state.active_tab = 1
+                                st.rerun()
+                    else:
+                        st.error("Failed to process the input. Please check your file or URL.")
         
         # Handle save buttons for each paper after initial processing
         for paper_id in st.session_state.json_text:
@@ -217,6 +244,13 @@ def show():
     with tab2:
         st.subheader("Chat with LLM about Medical Papers")
         
+        # If we just came from tab1 via the Chat button, show a helpful message
+        if st.session_state.active_tab == 1 and 'current_paper_id' in st.session_state:
+            paper_id = st.session_state.current_paper_id
+            if paper_id in st.session_state.processed_papers:
+                paper_title = st.session_state.processed_papers[paper_id]["title"]
+                st.info(f"Ready to chat about '{paper_title}'. Select the paper below and ask questions.")
+        
         # Initialize LLM
         if 'llm' not in st.session_state:
             try:
@@ -256,14 +290,17 @@ def show():
             if selected_paper_id != "all":
                 paper_data = st.session_state.processed_papers[selected_paper_id]
                 
+                # Display paper information sections
                 if view_options == "Processed Data":
                     with st.expander("Paper processed data", expanded=True):
-                        st.json(paper_data["data"])
+                        st.json(paper_data["data"])  # This is implemented
                 elif view_options == "Context Information":
                     with st.expander("Context information", expanded=True):
                         if "context" in paper_data and paper_data["context"]:
+                            # Display context information
                             st.json(paper_data["context"])
                         else:
+                            # Show message when no context available
                             st.info("No context information available for this paper.")
                 elif view_options == "Raw Paper Text":
                     with st.expander("Raw paper text", expanded=True):
