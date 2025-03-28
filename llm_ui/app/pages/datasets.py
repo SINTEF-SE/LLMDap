@@ -7,6 +7,7 @@ import glob
 import random
 import importlib.util
 import inspect
+import math
 from datetime import datetime
 from typing import List, Dict, Any
 
@@ -125,6 +126,11 @@ def find_dataset_files():
         st.error("No data directories found. Please check your project structure.")
     
     return all_dataset_files
+
+def find_all_dataset_files():
+    """Find all dataset files without limiting the number"""
+    # Use the existing find_dataset_files function but rename for clarity
+    return find_dataset_files()
 
 def load_schema_examples(schema_file_path):
     """Load examples from a schema file using importlib"""
@@ -458,6 +464,21 @@ def load_dataset_sample(dataset_files, max_samples=10):
     # Only return regular datasets, no schemas
     return regular_datasets
 
+def load_datasets_paged(dataset_files, page_number=0, per_page=50):
+    """Load just a specific page of datasets"""
+    if not dataset_files:
+        return []
+    
+    # Calculate start and end indices
+    start_idx = page_number * per_page
+    end_idx = min(start_idx + per_page, len(dataset_files))
+    
+    # Get just the files for this page
+    page_files = dataset_files[start_idx:end_idx]
+    
+    # Use existing function to load just these files
+    return load_dataset_sample(page_files, max_samples=per_page)
+
 def filter_datasets(datasets, search_term):
     """Filter datasets based on a search term."""
     if not search_term:
@@ -568,6 +589,41 @@ def show():
     if 'selected_datasets' not in st.session_state:
         st.session_state.selected_datasets = []
     
+    # Initialize session state for pagination
+    if 'current_page' not in st.session_state:
+        st.session_state.current_page = 0
+    if 'current_dataset_page' not in st.session_state:
+        st.session_state.current_dataset_page = 0
+
+    # Initialize session state for pagination properly
+    if 'all_dataset_files' not in st.session_state:
+        st.session_state.all_dataset_files = []
+    if 'total_datasets' not in st.session_state:
+        st.session_state.total_datasets = 0
+    if 'current_dataset_page' not in st.session_state:
+        st.session_state.current_dataset_page = 0
+        
+    # Default values for settings (moved to top of function)
+    initial_display = 50
+    datasets_per_page = 10
+    show_all = True
+    
+    # Advanced settings expander (always show this)
+    with st.expander("Advanced Settings", expanded=False):
+        # Keep user friendly sample limit for initial display
+        initial_display = st.slider("Number of datasets to display initially:", 
+                            min_value=10, max_value=100, value=initial_display, step=10)
+        
+        # Add option to see all datasets
+        show_all = st.checkbox("Enable full dataset navigation (1000+ papers)", value=show_all,
+                            help="When enabled, you can navigate through all available papers")
+        
+        # Datasets per page control
+        datasets_per_page = st.slider("Datasets per page:", 
+                               min_value=5, max_value=50, value=datasets_per_page, step=5)
+        
+        st.info("For large datasets, papers will load one page at a time to improve performance.")
+    
     # Demo mode checkbox - show at the top
     demo_mode = st.checkbox("Use demo datasets", value=False, 
                       help="Enable this option if you don't have dataset files available")
@@ -605,28 +661,33 @@ def show():
     elif 'datasets' not in st.session_state:
         # Load from cache or discover files
         cached_datasets = load_cached_datasets()
+        
+        # Always find ALL dataset files to ensure pagination works
+        with st.spinner("Finding all available datasets..."):
+            all_dataset_files = find_dataset_files()
+            st.session_state.all_dataset_files = all_dataset_files
+            st.session_state.total_datasets = len(all_dataset_files)
+            
+            if len(all_dataset_files) > 0:
+                st.success(f"Found {len(all_dataset_files)} total dataset files")
+        
+        # If we have cached datasets, load those for initial display
         if cached_datasets:
             st.session_state.datasets = cached_datasets
             st.success(f"Loaded {len(cached_datasets)} datasets from cache")
+            st.info(f"You can navigate through all {len(all_dataset_files)} datasets using the pagination controls")
         else:
-            # Find dataset files
-            with st.spinner("Searching for dataset files..."):
-                dataset_files = find_dataset_files()
-                
-                if not dataset_files:
+            # No cache, so load initial datasets
+            with st.spinner("Loading initial datasets..."):
+                if not all_dataset_files:
                     st.warning("No dataset files found. Please use the demo mode or upload your own files.")
                     st.session_state.datasets = []
                 else:
-                    # Allow user to specify how many datasets to load
-                    max_datasets = 50
-                    with st.expander("Advanced Settings", expanded=False):
-                        max_datasets = st.slider("Number of datasets to load:", 
-                                            min_value=10, max_value=200, value=50, step=10)
-                    
-                    st.session_state.datasets = load_dataset_sample(dataset_files, max_samples=max_datasets)
+                    # Load just the first page worth of datasets
+                    st.session_state.datasets = load_dataset_sample(all_dataset_files, max_samples=initial_display)
                     if st.session_state.datasets:
                         save_cached_datasets(st.session_state.datasets)
-                        st.success(f"Loaded {len(st.session_state.datasets)} datasets")
+                        st.success(f"Loaded {len(st.session_state.datasets)} datasets (Page 1 of {math.ceil(len(all_dataset_files)/datasets_per_page)})")
                         
                         # Fetch publication titles for any PMIDs
                         with st.spinner("Fetching publication titles..."):
@@ -647,25 +708,84 @@ def show():
     st.write(f"Found {len(filtered_datasets)} matching datasets")
     
     # Implement pagination for datasets
-    datasets_per_page = 10
     total_pages = max(1, (len(filtered_datasets) + datasets_per_page - 1) // datasets_per_page)
 
-    # Create columns for navigation
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col1:
-        if 'current_page' not in st.session_state:
-            st.session_state.current_page = 0
-        if st.button("Previous", disabled=st.session_state.current_page == 0):
-            st.session_state.current_page -= 1
-            st.rerun()
-            
-    with col2:
-        st.write(f"Page {st.session_state.current_page + 1} of {max(1, total_pages)}")
+    # Show full pagination if we have all dataset files
+    if hasattr(st.session_state, 'all_dataset_files') and st.session_state.all_dataset_files and show_all:
+        st.write(f"Showing page {st.session_state.current_dataset_page + 1} of {(st.session_state.total_datasets + datasets_per_page - 1) // datasets_per_page}")
         
-    with col3:
-        if st.button("Next", disabled=st.session_state.current_page >= total_pages - 1):
-            st.session_state.current_page += 1
-            st.rerun()
+        # Create better pagination controls
+        col1, col2, col3, col4, col5 = st.columns([1, 1, 2, 1, 1])
+        
+        with col1:
+            if st.button("⏮️ First"):
+                st.session_state.current_dataset_page = 0
+                # Load the new page of datasets
+                new_page_datasets = load_datasets_paged(
+                    st.session_state.all_dataset_files,
+                    st.session_state.current_dataset_page,
+                    datasets_per_page
+                )
+                if new_page_datasets:
+                    st.session_state.datasets = fetch_all_pubmed_titles(new_page_datasets)
+                st.rerun()
+                
+        with col2:
+            if st.button("◀️ Prev") and st.session_state.current_dataset_page > 0:
+                st.session_state.current_dataset_page -= 1
+                # Load the new page of datasets
+                new_page_datasets = load_datasets_paged(
+                    st.session_state.all_dataset_files,
+                    st.session_state.current_dataset_page,
+                    datasets_per_page
+                )
+                if new_page_datasets:
+                    st.session_state.datasets = fetch_all_pubmed_titles(new_page_datasets)
+                st.rerun()
+        
+        with col3:
+            total_pages = (st.session_state.total_datasets + datasets_per_page - 1) // datasets_per_page
+            page_number = st.number_input("Go to page", 
+                                        min_value=1, 
+                                        max_value=total_pages,
+                                        value=st.session_state.current_dataset_page + 1)
+            if page_number != st.session_state.current_dataset_page + 1:
+                st.session_state.current_dataset_page = page_number - 1
+                # Load the new page of datasets
+                new_page_datasets = load_datasets_paged(
+                    st.session_state.all_dataset_files,
+                    st.session_state.current_dataset_page,
+                    datasets_per_page
+                )
+                if new_page_datasets:
+                    st.session_state.datasets = fetch_all_pubmed_titles(new_page_datasets)
+                st.rerun()
+        
+        with col4:
+            if st.button("Next ▶️") and st.session_state.current_dataset_page < total_pages - 1:
+                st.session_state.current_dataset_page += 1
+                # Load the new page of datasets
+                new_page_datasets = load_datasets_paged(
+                    st.session_state.all_dataset_files,
+                    st.session_state.current_dataset_page,
+                    datasets_per_page
+                )
+                if new_page_datasets:
+                    st.session_state.datasets = fetch_all_pubmed_titles(new_page_datasets)
+                st.rerun()
+                
+        with col5:
+            if st.button("Last ⏭️"):
+                st.session_state.current_dataset_page = total_pages - 1
+                # Load the new page of datasets
+                new_page_datasets = load_datasets_paged(
+                    st.session_state.all_dataset_files,
+                    st.session_state.current_dataset_page,
+                    datasets_per_page
+                )
+                if new_page_datasets:
+                    st.session_state.datasets = fetch_all_pubmed_titles(new_page_datasets)
+                st.rerun()
 
     # Calculate page start and end
     start_idx = st.session_state.current_page * datasets_per_page

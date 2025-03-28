@@ -5,3 +5,4 @@ profiler/all_results/**.json
 profiler/output_log.txt
 ontologies/efo.owl
 *.swp
+llm_ui/app/openai_key.py
