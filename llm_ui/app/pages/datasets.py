@@ -146,8 +146,9 @@ def show():
 
                     with col1:
                         title = dataset.get('title', 'Unknown Title')
-                        source = dataset.get('source', 'unknown')
-                        # Determine icon and suffix based on source field from DB
+                        source = dataset.get('source', 'unknown') # Get source from DB data
+                        print(f"[DATASETS_PAGE] Displaying dataset: Accession={dataset.get('accession')}, Source='{source}'") # Debug source value
+                        # Determine icon and suffix based on source
                         if source == 'user_provider': icon = "💾"; title_suffix = "(User Saved)"
                         elif source == 'arrayexpress': icon = "🔬"; title_suffix = "" # No suffix for default source
                         elif source == 'bulk_processed': icon = "📚"; title_suffix = "(Bulk Processed)"
@@ -178,7 +179,8 @@ def show():
 
                         if not dataset_id_for_key: continue # Skip if no file_path (shouldn't happen)
 
-                        checkbox_key = f"select_{dataset_id_for_key}" # Use file_path for unique key
+                        # Use file_path for the checkbox key to ensure uniqueness
+                        checkbox_key = f"select_{dataset_id_for_key}"
                         is_selected = dataset_id_for_selection in st.session_state.globally_selected_items
 
                         # Update selection dictionary on change using a callback

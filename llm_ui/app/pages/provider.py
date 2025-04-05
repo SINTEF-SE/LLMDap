@@ -1,656 +1,661 @@
-import sys
-import os
 import streamlit as st
+import os
+import sys
 import json
 import requests
 import re
+import tempfile
+import pydantic
+from pydantic import create_model, Field
+from typing import Optional, Any, List, Dict, Union
+from urllib.parse import urlparse
+import shutil # For cleaning up temp dirs
 
-# Add project root to path
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
+# Add project root and profiler directory to path for imports
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 sys.path.append(project_root)
-
-# Add profiler directory to path
 profiler_dir = os.path.join(project_root, 'profiler')
 sys.path.append(profiler_dir)
+data_dir = os.path.join(project_root, 'data')
+sys.path.append(data_dir)
 
-# Import the LLM class
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from llm import LLM
+# --- Attempt Imports with Error Handling ---
+# Removed arxpr2_schema and partition imports from here
+def import_dependencies():
+    dependencies = {
+        "call_inference": None, "save_xml": None, "init_db": None,
+        "upsert_dataset": None # Removed "partition": None and "arxpr2_schema": None
+    }
+    import_errors = []
 
-# Import the specific functions from profiler.py and db_utils
-from pages.profiler import handle_input, handle_schema
-from db_utils import init_db, upsert_dataset # Import DB functions
-
-try:
-    from profiler.run_inference import call_inference
-except ImportError:
-    st.error("Could not import call_inference function. Please check your project structure.")
-    call_inference = None
-
-def load_settings():
-    """Load configuration parameters from settings.json."""
     try:
-        # Ensure the path is relative to the project root
-        settings_path = os.path.join(project_root, 'settings.json')
-        with open(settings_path, 'r') as f:
-            return json.load(f)
-    except FileNotFoundError:
-        st.warning("settings.json not found, using default settings.")
-        return {
-            'temperature': 0.3,
-            'max_tokens': 500,
-            'similarity_k': 5,
-            'model': 'llama3.1I-8b-q4',
-            'use_openai': False,
-            'profiler_options': {
-                'field_info_to_compare': 'choices'
-            }
-        }
-    except json.JSONDecodeError:
-        st.error("Error decoding settings.json, using default settings.")
-        return {
-            'temperature': 0.3,
-            'max_tokens': 500,
-            'similarity_k': 5,
-            'model': 'llama3.1I-8b-q4',
-            'use_openai': False,
-            'profiler_options': {
-                'field_info_to_compare': 'choices'
-            }
-        }
+        from profiler.run_inference import call_inference
+        dependencies["call_inference"] = call_inference
+    except ImportError as e: import_errors.append(f"call_inference: {e}")
+    try:
+        from data.xml_fetcher import save_xml
+        dependencies["save_xml"] = save_xml
+    except ImportError as e: import_errors.append(f"save_xml: {e}")
+    try:
+        from llm_ui.app.db_utils import init_db, upsert_dataset
+        dependencies["init_db"] = init_db
+        dependencies["upsert_dataset"] = upsert_dataset
+    except ImportError as e: import_errors.append(f"db_utils: {e}")
+    try:
+        # Try importing partition here, but don't store globally
+        from unstructured.partition.auto import partition
+        dependencies["partition"] = partition # Store function ref if successful
+    except ImportError:
+        import_errors.append("unstructured (required for PDF processing)")
+        dependencies["partition"] = None # Explicitly set to None if import fails
 
-# Define run_pipeline function locally as it was previously imported from profiler page
-def run_pipeline(xml_path, schema_path, ff_model="llama3.1I-8b-q4", similarity_k=5, field_info_to_compare="choices"):
-    """Run the profiling pipeline with better text processing"""
-    if call_inference is None:
-        st.error("call_inference function could not be imported")
+    # Removed arxpr2_schema import attempt from here
+
+    return dependencies, import_errors
+
+# --- Helper Functions ---
+
+# Error display moved after st.title
+# Dependency loading moved after st.title
+
+def is_pubmed_id(input_string):
+    """Check if the input string looks like a PubMed ID (numeric)."""
+    return input_string.strip().isdigit()
+
+def fetch_xml_from_pubmed(pmid, temp_dir, save_xml_func):
+    """Fetches XML for a PubMed ID and saves it to a temporary file."""
+    if save_xml_func is None:
+        st.error("XML fetching function (save_xml) is not available due to import error.")
         return None
-
     try:
-        # Determine the schema to use
-        schema_to_use = None
-        if schema_path: # If a custom schema file path is provided
-             if isinstance(schema_path, str) and os.path.exists(schema_path):
-                 # Load schema from file - Requires converting JSON schema to Pydantic model
-                 # This part needs implementation if custom JSON schemas are to be supported fully
-                 st.error("Loading schema from custom JSON file is not fully implemented yet.")
-                 # As a placeholder, try to load a default schema if available
-                 try:
-                     from profiler.metadata_schemas import arxpr2_schema # Example default
-                     schema_to_use = arxpr2_schema.Metadata_form
-                     st.warning("Using default ARXPR2 schema as custom schema loading is not implemented.")
-                 except ImportError:
-                     st.error("Could not load default schema.")
-                     return None
-             elif hasattr(schema_path, '__fields__'): # Check if it's already a Pydantic model class
-                 schema_to_use = schema_path
-             else:
-                 st.error("Invalid schema provided.")
-                 return None
-        else:
-             # Use a default schema if none provided
-             try:
-                 from profiler.metadata_schemas import arxpr2_schema # Example default
-                 schema_to_use = arxpr2_schema.Metadata_form
-                 st.info("No custom schema provided, using default ARXPR2 schema.")
-             except ImportError:
-                 st.error("Could not load default schema.")
-                 return None
-
-        if schema_to_use is None:
-             st.error("Schema could not be determined.")
+        st.info(f"Attempting to fetch PubMed ID {pmid} using save_xml into {temp_dir}...")
+        success = save_xml_func(pmid, folder=temp_dir)
+        if success:
+             possible_encodings = ["ascii", "utf-8"]
+             possible_sources = ["pmcoa", "pubmed"]
+             saved_path = None
+             # Check specific known patterns first
+             for enc in possible_encodings:
+                 for src in possible_sources:
+                     fname = f"{pmid}_{enc}_{src}.xml"
+                     potential_path = os.path.join(temp_dir, fname)
+                     if os.path.exists(potential_path):
+                         saved_path = potential_path
+                         st.info(f"Found saved PubMed XML: {saved_path}")
+                         return saved_path
+             # Fallback: check for any XML file starting with the PMID
+             for item in os.listdir(temp_dir):
+                 if item.startswith(str(pmid)) and item.lower().endswith(".xml"):
+                     saved_path = os.path.join(temp_dir, item)
+                     st.info(f"Found saved PubMed XML (fallback): {saved_path}")
+                     return saved_path
+             st.error(f"save_xml reported success, but couldn't find the saved file for {pmid} in {temp_dir}.")
              return None
-
-        # Run the inference with the specified model and schema
-        st.info(f"Using {ff_model} for paper analysis with schema: {schema_to_use.__name__}")
-
-        # Call the inference function with proper parameters
-        output = call_inference(
-            schema=schema_to_use,
-            paper_path=xml_path,
-            similarity_k=similarity_k,
-            field_info_to_compare=field_info_to_compare,
-            ff_model=ff_model
-        )
-
-        # Check and clean up the output - this helps fix garbled context
-        if output and len(output) > 0:
-            # Check if we need to clean context sections
-            for key in output:
-                if isinstance(output[key], dict) and "context" in output[key]:
-                    context = output[key]["context"]
-                    # Clean each field in the context
-                    for field in context:
-                        if isinstance(context[field], str):
-                            # Add spaces between words (simple heuristic)
-                            cleaned_text = context[field]
-                            # Replace "convertedFont" markers which appear frequently
-                            cleaned_text = cleaned_text.replace("convertedFont", " ")
-                            # Add space after periods and commas if not followed by space
-                            cleaned_text = re.sub(r'\.(?! )', '. ', cleaned_text)
-                            cleaned_text = re.sub(r',(?! )', ', ', cleaned_text)
-                            # Clean up multiple spaces
-                            cleaned_text = re.sub(r' +', ' ', cleaned_text)
-                            context[field] = cleaned_text
-            return output
         else:
-            st.error("No output generated from pipeline")
+            st.error(f"Failed to fetch XML for PubMed ID {pmid} using save_xml.")
             return None
-
     except Exception as e:
-        st.error(f"Error running pipeline: {str(e)}")
+        st.error(f"Error fetching PubMed XML for ID {pmid}: {e}")
         import traceback
         st.error(traceback.format_exc())
         return None
 
+def fetch_xml_from_url(url, temp_dir):
+    """Fetches XML/HTML from a direct URL and saves it to a temporary file."""
+    try:
+        st.info(f"Attempting to download content from URL: {url}")
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'}
+        response = requests.get(url, timeout=30, headers=headers, allow_redirects=True) # Increased timeout, added headers, allow redirects
+        response.raise_for_status()
+        content_type = response.headers.get('content-type', '').lower()
+        # Be more lenient with content type checking
+        if not any(ct in content_type for ct in ['xml', 'html', 'text/plain']):
+             st.warning(f"URL content type is '{content_type}'. Expected XML, HTML, or plain text. Proceeding anyway.")
+
+        parsed_url = urlparse(url)
+        filename = os.path.basename(parsed_url.path)
+        # Improve filename generation
+        if not filename or '.' not in filename[-5:]: # If no name or no common extension
+             # Try to get name from content disposition header
+             cd = response.headers.get('content-disposition')
+             if cd:
+                  fname = re.findall('filename="?(.+)"?', cd)
+                  if fname:
+                       filename = fname[0]
+             if not filename or '.' not in filename[-5:]: # Fallback if still no good name
+                  ext = ".xml" # Default assumption
+                  if 'html' in content_type: ext = ".html"
+                  elif 'text/plain' in content_type: ext = ".txt"
+                  filename = f"downloaded_{hash(url)}{ext}"
+
+        filename = re.sub(r'[^\w\-_\.]', '_', filename) # Sanitize
+        temp_file_path = os.path.join(temp_dir, filename)
+
+        with open(temp_file_path, 'wb') as f:
+            f.write(response.content)
+        st.info(f"Successfully downloaded content from URL to {temp_file_path}")
+        return temp_file_path
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error fetching from URL {url}: {e}")
+        return None
+    except Exception as e:
+        st.error(f"An unexpected error occurred while fetching from URL {url}: {e}")
+        return None
+
+def extract_text_from_file(input_path, temp_dir, partition_func):
+    """Extracts text from PDF or other file types using unstructured and saves it."""
+    if partition_func is None: # Check if partition function was successfully imported
+        st.error("Text extraction is disabled because 'unstructured' library is not available or failed to import.")
+        return None
+    try:
+        filename = os.path.basename(input_path)
+        st.info(f"Extracting content from: {filename} using 'unstructured'...")
+        # Using partition which handles various types including PDF, XML, HTML, TXT
+        elements = partition_func(filename=input_path) # Use the passed function
+        extracted_text = "\n\n".join([str(el.text) for el in elements]) # Use el.text for cleaner output
+
+        if not extracted_text.strip():
+             st.warning(f"No text content could be extracted from {filename}.")
+             return None
+
+        # Save extracted text to a file (useful for consistency or if pipeline needs text file)
+        txt_filename = os.path.splitext(filename)[0] + "_extracted.txt"
+        txt_path = os.path.join(temp_dir, txt_filename)
+        with open(txt_path, "w", encoding="utf-8") as f:
+            f.write(extracted_text)
+        st.info(f"Successfully extracted text content and saved to {txt_path}")
+        # Return the path to the extracted text file.
+        return txt_path
+    except Exception as e:
+        st.error(f"Error extracting content from {os.path.basename(input_path)}: {e}")
+        import traceback
+        st.error(traceback.format_exc())
+        return None
+
+@st.cache_resource # Cache the default schema model class (use resource for non-serializable types)
+def get_default_schema_model():
+     """Loads the default Pydantic schema model class."""
+     try:
+         # Import directly inside the cached function
+         from profiler.metadata_schemas import arxpr2_schema
+         # Check the imported module directly
+         if hasattr(arxpr2_schema, 'Metadata_form'): # Corrected: Check the imported module
+             return arxpr2_schema.Metadata_form
+         else:
+             st.error("Default schema module loaded, but 'Metadata_form' class is missing.")
+             return None
+     except ImportError as e:
+         st.error(f"Default schema (profiler.metadata_schemas.arxpr2_schema) could not be imported: {e}")
+         return None
+
+@st.cache_resource # Cache model creation based on schema content hash (use resource for non-serializable types)
+def create_pydantic_model_from_schema(schema_content: str, model_name: str = "CustomSchemaModel") -> Optional[type[pydantic.BaseModel]]:
+    """Dynamically creates a Pydantic model from a JSON schema string."""
+    fields = {}
+    try:
+        schema_dict = json.loads(schema_content)
+        properties = schema_dict.get("properties", {})
+        required = schema_dict.get("required", [])
+
+        # More robust type mapping, including handling potential 'null' type
+        def map_type(prop_schema):
+            type_val = prop_schema.get("type")
+            if isinstance(type_val, list): # Handle ["type", "null"]
+                non_null_type = next((t for t in type_val if t != "null"), None)
+                is_optional = "null" in type_val
+                type_str = non_null_type
+            else:
+                type_str = type_val
+                is_optional = False # Determined later by 'required' list
+
+            base_type_mapping = {
+                "string": str, "number": float, "integer": int,
+                "boolean": bool, "array": List, "object": Dict, None: Any
+            }
+            base_type = base_type_mapping.get(type_str, Any)
+
+            if type_str == "array":
+                items_schema = prop_schema.get("items", {})
+                item_type, _ = map_type(items_schema) # Recursive call for item type
+                final_type = List[item_type]
+            else:
+                final_type = base_type
+
+            return final_type, is_optional
+
+        for name, prop_schema in properties.items():
+            field_type, type_is_optional = map_type(prop_schema)
+            is_required = name in required
+            is_truly_optional = type_is_optional or not is_required
+
+            # Use Field for descriptions, default values etc.
+            field_args = {"description": prop_schema.get("description")}
+            if "default" in prop_schema:
+                 field_args["default"] = prop_schema["default"]
+                 final_type = Optional[field_type] # Make optional if default exists
+            elif is_truly_optional:
+                 field_args["default"] = None
+                 final_type = Optional[field_type]
+            else: # Required field
+                 field_args["default"] = ... # Ellipsis indicates required
+                 final_type = field_type # Keep original type
+
+            fields[name] = (final_type, Field(**field_args))
+
+        if not fields:
+             st.error("Cannot create model: No properties found in the schema.")
+             return None
+
+        DynamicModel = create_model(model_name, **fields)
+        st.success(f"Successfully created dynamic Pydantic model '{model_name}' from schema.")
+        return DynamicModel
+
+    except json.JSONDecodeError:
+         st.error("Invalid JSON content in schema file.")
+         return None
+    except Exception as e:
+        st.error(f"Error creating Pydantic model from schema: {e}")
+        import traceback
+        st.error(traceback.format_exc())
+        return None
+
+# --- Streamlit App ---
 
 def show():
-    """Main function to display the provider page"""
-    st.title("Provider View - Dataset Profiling and LLM Interaction")
+    st.title("📄 Paper Processing and Analysis")
 
-    # Initialize database on first run
-    init_db()
+    # Load dependencies and display errors (Moved here)
+    deps, errors = import_dependencies()
+    call_inference = deps["call_inference"]
+    save_xml = deps["save_xml"]
+    init_db = deps["init_db"]
+    upsert_dataset = deps["upsert_dataset"]
+    partition_func = deps.get("partition") # Get partition func, might be None
 
-    # Initialize session state if not already done
-    if 'processed_papers' not in st.session_state:
-        st.session_state.processed_papers = {}
-    if 'chat_history' not in st.session_state:
-        st.session_state.chat_history = {}
-    if 'json_text' not in st.session_state:
-        st.session_state.json_text = {}
-    if 'active_tab' not in st.session_state:
-        st.session_state.active_tab = 0
-    if 'current_paper_id' not in st.session_state:
-         st.session_state.current_paper_id = 0 # Start IDs from 0 or 1 consistently
+    if errors:
+        # Display errors but allow the rest of the app to render if possible
+        # Filter out specific errors handled elsewhere
+        display_errors = [e for e in errors if "arxpr2_schema" not in e and "unstructured" not in e] # Also filter unstructured
+        if display_errors:
+            st.error(f"Import Errors: {', '.join(display_errors)}. Some functionality may be disabled.")
 
-    # Create tabs for different functionalities
-    tab1, tab2 = st.tabs(["Process Papers", "Chat with LLM"])
+    # Initialize database
+    if init_db:
+        try:
+            init_db()
+        except Exception as db_init_e:
+            st.error(f"Failed to initialize database: {db_init_e}")
 
-    with tab1:
-        st.subheader("Process a Scientific Paper")
+    # Initialize session state
+    default_session_state = {
+        'processed_data': None, 'edited_json': None, 'source_info': None,
+        'error_message': None, 'chat_context': None, 'temp_dir': None,
+        'schema_choice': 'Default Schema', 'schema_model_to_use': None,
+        'uploaded_schema_content': None
+    }
+    for key, default_value in default_session_state.items():
+        if key not in st.session_state:
+            st.session_state[key] = default_value
 
-        # Add a nice description
-        st.markdown("*Upload an XML paper file or provide a URL to analyze the dataset described in the paper.*")
+    # --- Input Section ---
+    with st.container(border=True):
+        st.subheader("1. Provide Input Paper")
+        input_method = st.radio("Select Input Method:", ("Upload File", "Enter URL or PubMed ID"),
+                                horizontal=True, key="input_method_radio", index=0)
 
-        # Create a visually distinct upload area
-        with st.container(border=True):
-            st.markdown("##### Upload Paper")
-            uploaded_file = st.file_uploader("Choose an .xml file", type=["xml"], key="xml_uploader")
+        uploaded_file = None
+        input_url_or_id = ""
 
-            # Add a divider between upload and URL
-            if not uploaded_file:
-                st.markdown("*OR*")
-                xml_url = st.text_input("Provide a URL to an .xml file")
-            else:
-                xml_url = None # Clear URL if file is uploaded
-
-        # Make the schema upload section more distinct
-        with st.container(border=True):
-            st.markdown("##### Schema Configuration")
-            st.markdown("*Optional: Upload a custom schema file (JSON) or select a predefined one.*")
-            schema_file = st.file_uploader("Upload JSON schema", type=["json"], key="json_uploader")
-            # Add option for predefined schemas later if needed
-
-        # Make the model selection more visually distinct
-        with st.container(border=True):
-            st.markdown("##### Model Selection")
-            processing_model = st.radio(
-                "Select model for paper processing:",
-                ["OpenAI GPT-4o (faster, more accurate)", "Local Llama (slower, no API costs)"],
-                horizontal=True,
-                index=1  # Default to local model
-            )
-
-        # Add a clearer button
-        st.markdown("---")
-        if st.button("▶️ Run Pipeline", use_container_width=True):
-            with st.spinner("Running the pipeline... Please wait."):
-                xml_path = handle_input(uploaded_file, xml_url)
-
-                if xml_path:
-                    schema_path_or_obj = handle_schema(schema_file) # This might return path or Pydantic model
-
-                    # Load settings
-                    settings = load_settings()
-
-                    # Load the raw paper text
-                    raw_paper_text = "Raw text not available"
-                    try:
-                        from profiler.dataset_loader import load_paper_text_from_file_path
-                        raw_paper_text = load_paper_text_from_file_path(xml_path)
-                    except Exception as e:
-                        st.warning(f"Could not load raw paper text: {str(e)}")
-
-                    # Choose the model based on UI selection
-                    ff_model = "4o" if processing_model.startswith("OpenAI") else "llama3.1I-8b-q4"
-
-                    # Get settings from configuration
-                    similarity_k = settings.get('similarity_k', 5)
-                    field_info_to_compare = settings.get('profiler_options', {}).get('field_info_to_compare', 'choices')
-
-                    # Pass the model identifier and settings to run_pipeline
-                    output_json = run_pipeline(
-                        xml_path,
-                        schema_path_or_obj, # Pass the schema path or object
-                        ff_model=ff_model,
-                        similarity_k=similarity_k,
-                        field_info_to_compare=field_info_to_compare
-                    )
-
-                    if output_json:
-                        st.subheader("Pipeline Output")
-
-                        # Increment paper ID
-                        st.session_state.current_paper_id += 1
-                        paper_id = st.session_state.current_paper_id
-
-                        # Format the JSON for display
-                        formatted_json = json.dumps(output_json, indent=4)
-                        st.session_state.json_text[paper_id] = formatted_json
-
-                        # Show the JSON in a text area
-                        json_text_area = st.text_area(
-                            "Edit the JSON output:",
-                            st.session_state.json_text[paper_id],
-                            height=300,
-                            key=f"json_area_{paper_id}"
-                        )
-
-                        # Update the stored JSON text when edited
-                        st.session_state.json_text[paper_id] = json_text_area
-
-                        # Determine paper title
-                        paper_title = f"Paper {paper_id}"
-                        if uploaded_file:
-                            paper_title = uploaded_file.name
-                        elif xml_url:
-                            # Extract filename from URL more robustly
-                            try:
-                                from urllib.parse import urlparse
-                                parsed_url = urlparse(xml_url)
-                                paper_title = os.path.basename(parsed_url.path) or f"URL_Paper_{paper_id}"
-                            except:
-                                paper_title = f"URL_Paper_{paper_id}"
-
-
-                        # Extract the paper data and context
-                        paper_data = output_json
-                        context_info = {}
-
-                        # If the structure is like {"0": {"filled_form": {...}, "context": {...}}}, extract properly
-                        # Assuming call_inference now returns a dict where keys are paper identifiers (like "0" or maybe the pmid)
-                        # Let's find the first key if it's nested like this
-                        first_key = next(iter(output_json), None)
-                        if first_key is not None and isinstance(output_json[first_key], dict):
-                             nested_data = output_json[first_key]
-                             if "filled_form" in nested_data:
-                                 paper_data = nested_data["filled_form"]
-                             if "context" in nested_data:
-                                 context_info = nested_data["context"]
-                        # If it's not nested, paper_data remains output_json
-
-                        # Store everything in session state
-                        st.session_state.processed_papers[paper_id] = {
-                            "title": paper_title,
-                            "data": paper_data, # Store the potentially nested 'filled_form' data
-                            "context": context_info,
-                            "raw_text": raw_paper_text,
-                            "source": xml_path,
-                            "full_output": output_json # Store the raw output from run_pipeline
-                        }
-
-                        # Success message and action buttons in columns
-                        st.success(f"Paper processed successfully!")
-
-                        # Create three columns for the action buttons
-                        col1, col2, col3 = st.columns(3)
-
-                        with col1:
-                            # Save raw output button
-                            if st.button("💾 Save Full Output", key=f"save_full_btn_{paper_id}"):
-                                try:
-                                    output_path = f"full_output_{paper_id}.json" # Save in root dir for now
-                                    with open(output_path, "w") as f:
-                                        # Save the potentially edited JSON from the text area
-                                        f.write(st.session_state.json_text[paper_id])
-                                    st.success(f"Full output saved to {output_path}!")
-                                except Exception as e:
-                                    st.error(f"Error saving full output: {str(e)}")
-
-                        with col2:
-                             # Save to Datasets button
-                            if st.button("➕ Save to My Datasets", key=f"save_dataset_btn_{paper_id}"):
-                                try:
-                                    # Define the path for user datasets
-                                    user_datasets_dir = os.path.join(project_root, 'llm_ui', 'app', 'user_datasets')
-                                    os.makedirs(user_datasets_dir, exist_ok=True)
-
-                                    # Get the processed data (potentially edited by user)
-                                    processed_data_json = json.loads(st.session_state.json_text[paper_id])
-
-                                    # Extract the relevant part ('filled_form' if nested)
-                                    first_key = next(iter(processed_data_json), None)
-                                    if first_key is not None and isinstance(processed_data_json[first_key], dict) and "filled_form" in processed_data_json[first_key]:
-                                         paper_data_to_save = processed_data_json[first_key]["filled_form"]
-                                    else:
-                                         paper_data_to_save = processed_data_json # Assume flat structure otherwise
-
-                                    # Extract key metadata for the dataset browser view
-                                    # Use .get() for safety, provide defaults
-                                    # Try to get pmid/accession from the processed data first, then from the stored session state
-                                    pmid = paper_data_to_save.get('pmid', st.session_state.processed_papers[paper_id].get('pmid'))
-                                    if not pmid or pmid == 'unknown': pmid = f'provider_{paper_id}' # Fallback pmid
-
-                                    accession = paper_data_to_save.get('accession', st.session_state.processed_papers[paper_id].get('accession'))
-                                    if not accession or accession == 'Unknown': accession = f'USER-{pmid}' # Fallback accession
-
-                                    dataset_for_browser = {
-                                        'title': paper_data_to_save.get('title', st.session_state.processed_papers[paper_id].get('title', f"User Dataset {pmid}")),
-                                        'accession': accession,
-                                        'pmid': pmid,
-                                        'description': paper_data_to_save.get('description', 'User-provided dataset processed via Provider page.'),
-                                        'organism': paper_data_to_save.get('organism', 'Unknown'),
-                                        'study_type': paper_data_to_save.get('study_type', 'Unknown'),
-                                        'source': 'user_provider', # Mark as user-provided
-                                        'original_file': st.session_state.processed_papers[paper_id].get('source', 'Unknown'),
-                                        # Include other relevant fields if available in paper_data_to_save
-                                        'hardware': paper_data_to_save.get('hardware'),
-                                        'organism_part': paper_data_to_save.get('organism_part'),
-                                        'experimental_designs': paper_data_to_save.get('experimental_designs'),
-                                        'assay_by_molecule': paper_data_to_save.get('assay_by_molecule'),
-                                        'technology': paper_data_to_save.get('technology'),
-                                        'sample_count': paper_data_to_save.get('sample_count'),
-                                        'release_date': paper_data_to_save.get('release_date'),
-                                        'experimental_factors': paper_data_to_save.get('experimental_factors'),
-                                        # Optionally store the full processed data within this file too
-                                        # 'full_processed_data': paper_data_to_save
-                                    }
-
-                                    # Generate filename
-                                    safe_filename = re.sub(r'[^\w\-_\. ]', '_', f"user_dataset_{accession}.json")
-                                    save_path = os.path.join(user_datasets_dir, safe_filename)
-
-                                    # Save the standardized JSON file
-                                    with open(save_path, "w") as f:
-                                        json.dump(dataset_for_browser, f, indent=4)
-
-                                    # Also add/update the metadata in the SQLite database
-                                    # Ensure file_path is included for the primary key
-                                    dataset_for_browser['file_path'] = save_path
-                                    print(f"[PROVIDER_PAGE] Attempting to upsert dataset to DB: {dataset_for_browser}") # Debug print
-                                    upsert_dataset(dataset_for_browser)
-
-                                    # Show full path in success message
-                                    st.success(f"Processed data saved to My Datasets: {save_path}")
-                                    st.info("Database index updated.") # Add DB feedback
-
-                                    # Optionally clear the cache in datasets.py if it exists
-                                    # Note: With DB, caching might be less necessary or handled differently
-                                    cache_file = os.path.join(project_root, 'cached_datasets.json')
-                                    if os.path.exists(cache_file):
-                                         try:
-                                             os.remove(cache_file)
-                                             st.info("Cleared dataset cache. Refresh the Datasets page to see changes.")
-                                         except OSError as e:
-                                             st.warning(f"Could not clear dataset cache: {e}")
-
-                                except json.JSONDecodeError:
-                                     st.error("Could not save: Edited JSON is invalid.")
-                                except Exception as e:
-                                    st.error(f"Error saving dataset: {str(e)}")
-
-                        with col3:
-                            # Chat button that changes the active tab
-                            if st.button("💬 Chat with LLM", key=f"chat_btn_{paper_id}"):
-                                st.session_state.active_tab = 1
-                                st.rerun()
-                    else:
-                        st.error("Failed to process the input. Please check your file or URL.")
-
-        # Handle save buttons for each paper after initial processing (This seems redundant now?)
-        # Commenting out as the save buttons are now shown immediately after processing.
-        # for paper_id in st.session_state.json_text:
-        #     if st.button(f"Save Updated JSON for Paper {paper_id}", key=f"save_btn_{paper_id}"):
-        #         # ... (logic was here) ...
-
-        # Display list of processed papers
-        if st.session_state.processed_papers:
-            st.subheader("Processed Papers History (Current Session)")
-            for paper_id, paper in st.session_state.processed_papers.items():
-                st.write(f"- {paper['title']} (ID: {paper_id})")
-
-    with tab2:
-        st.subheader("Chat with LLM about Medical Papers")
-
-        # If we just came from tab1 via the Chat button, show a helpful message
-        if st.session_state.active_tab == 1 and 'current_paper_id' in st.session_state:
-            paper_id = st.session_state.current_paper_id
-            if paper_id in st.session_state.processed_papers:
-                paper_title = st.session_state.processed_papers[paper_id]["title"]
-                st.info(f"Ready to chat about '{paper_title}'. Select the paper below and ask questions.")
-
-        # Initialize LLM
-        if 'llm' not in st.session_state:
-            try:
-                with st.spinner("Initializing LLM... This may take a moment."):
-                    st.session_state.llm = LLM()
-                st.success("LLM initialized successfully!")
-            except Exception as e:
-                st.error(f"Error initializing LLM: {str(e)}")
-
-        # Check if we have processed papers
-        if not st.session_state.processed_papers:
-            st.warning("No processed papers available. Please process papers in the first tab.")
+        if input_method == "Upload File":
+            uploaded_file = st.file_uploader("Upload XML or PDF file", type=["xml", "pdf"], key="file_uploader")
+            if uploaded_file:
+                if st.session_state.source_info is None or st.session_state.source_info.get("name") != uploaded_file.name:
+                     st.session_state.source_info = {"type": "file", "name": uploaded_file.name}
+                     # Clear results on new input
+                     st.session_state.processed_data = None; st.session_state.edited_json = None; st.session_state.error_message = None
         else:
-            # Paper selection options
-            paper_options = {"All processed papers": "all"}
-            # Use paper_id as key for uniqueness
-            paper_options.update({f"{paper['title']} (ID: {paper_id})": paper_id
-                                for paper_id, paper in st.session_state.processed_papers.items()})
+            input_url_or_id_value = st.text_input("Enter XML URL or PubMed ID", key="url_input")
+            if input_url_or_id_value:
+                 if st.session_state.source_info is None or st.session_state.source_info.get("value") != input_url_or_id_value:
+                      st.session_state.source_info = {"type": "url_or_id", "value": input_url_or_id_value}
+                      # Clear results on new input
+                      st.session_state.processed_data = None; st.session_state.edited_json = None; st.session_state.error_message = None
+                 input_url_or_id = input_url_or_id_value
 
-            selected_paper_option = st.selectbox("Select papers to discuss:",
-                                                options=list(paper_options.keys()),
-                                                index=0)
+    # --- Schema Selection ---
+    with st.container(border=True):
+        st.subheader("2. Select Schema")
+        st.session_state.schema_choice = st.radio(
+            "Choose schema:",
+            ("Default Schema", "Upload Custom Schema"),
+            key="schema_choice_radio",
+            index=0 if st.session_state.schema_choice == "Default Schema" else 1
+        )
 
-            selected_paper_id_key = paper_options[selected_paper_option] # This is the paper_id or 'all'
+        uploaded_schema_file = None
+        schema_load_error = False
 
-            # Setup chat history for the selection
-            if selected_paper_id_key not in st.session_state.chat_history:
-                st.session_state.chat_history[selected_paper_id_key] = []
+        if st.session_state.schema_choice == "Upload Custom Schema":
+            uploaded_schema_file = st.file_uploader("Upload JSON Schema file", type=["json"], key="schema_uploader")
+            if uploaded_schema_file:
+                # Read content only if it's a new file or content not stored
+                if st.session_state.uploaded_schema_content is None or uploaded_schema_file.id != st.session_state.get('uploaded_schema_id'):
+                    try:
+                        st.session_state.uploaded_schema_content = uploaded_schema_file.read().decode("utf-8")
+                        st.session_state.uploaded_schema_id = uploaded_schema_file.id # Store ID to detect new uploads
+                        # Attempt to create model immediately
+                        model = create_pydantic_model_from_schema(st.session_state.uploaded_schema_content, model_name=f"CustomSchema_{uploaded_schema_file.name}")
+                        st.session_state.schema_model_to_use = model
+                        if not model: schema_load_error = True
+                    except Exception as e:
+                        st.error(f"Error reading or parsing schema file: {e}")
+                        st.session_state.uploaded_schema_content = None
+                        st.session_state.schema_model_to_use = None
+                        schema_load_error = True
+                # If content already loaded, use the cached model
+                elif st.session_state.schema_model_to_use is None and st.session_state.uploaded_schema_content:
+                     # Re-create model if it failed previously but content exists
+                     model = create_pydantic_model_from_schema(st.session_state.uploaded_schema_content, model_name="CustomSchema_Reloaded")
+                     st.session_state.schema_model_to_use = model
+                     if not model: schema_load_error = True
 
-            # View options
-            view_options = st.radio(
-                "Information to view:",
-                ["Processed Data", "Context Information", "Raw Paper Text", "All Information"],
-                horizontal=True
-            )
+            elif st.session_state.uploaded_schema_content:
+                 # File removed, clear stored content and model
+                 st.session_state.uploaded_schema_content = None
+                 st.session_state.schema_model_to_use = None
+                 st.warning("Custom schema file removed.")
+                 schema_load_error = True # Treat as error for disabling button
 
-            # Display paper information based on selection
-            if selected_paper_id_key != "all":
-                # Ensure the selected paper ID exists before accessing
-                if selected_paper_id_key in st.session_state.processed_papers:
-                    paper_info = st.session_state.processed_papers[selected_paper_id_key]
+            # Display status of custom schema
+            if st.session_state.schema_model_to_use and not schema_load_error:
+                 st.caption(f"Using uploaded schema: {st.session_state.schema_model_to_use.__name__}")
+            elif uploaded_schema_file and schema_load_error:
+                 st.caption("Uploaded schema has errors or could not be processed.")
+            elif not uploaded_schema_file:
+                 st.warning("Select 'Upload Custom Schema' requires a file to be uploaded.")
+                 schema_load_error = True # Disable processing if no file uploaded
 
-                    # Display paper information sections
-                    if view_options == "Processed Data":
-                        with st.expander("Paper processed data", expanded=True):
-                            st.json(paper_info.get("data", {})) # Use .get for safety
-                    elif view_options == "Context Information":
-                        with st.expander("Context information", expanded=True):
-                            if "context" in paper_info and paper_info["context"]:
-                                st.json(paper_info["context"])
+        else: # Default Schema
+            st.session_state.schema_model_to_use = get_default_schema_model()
+            if st.session_state.schema_model_to_use:
+                st.caption(f"Using default schema: {st.session_state.schema_model_to_use.__name__}")
+            else:
+                st.error("Default schema could not be loaded. Processing is disabled.")
+                schema_load_error = True
+
+    # --- Processing Section ---
+    with st.container(border=True):
+        st.subheader("3. Process Paper")
+
+        # Model Selection UI
+        processing_model_choice = st.radio(
+            "Select Processing Model:",
+            ("Local Model", "OpenAI API"),
+            key="processing_model_radio",
+            horizontal=True,
+            index=0 # Default to local
+        )
+
+        processing_disabled = (not uploaded_file and not input_url_or_id) or \
+                              not st.session_state.schema_model_to_use or \
+                              schema_load_error # Disable if any schema issue
+
+        process_button = st.button("🚀 Process Input", use_container_width=True, disabled=processing_disabled)
+
+        if process_button:
+            st.session_state.processed_data = None; st.session_state.edited_json = None; st.session_state.error_message = None
+            input_path_for_pipeline = None # Path to XML or original file
+            extracted_text_content = None # Content of extracted text file
+            schema_to_run = st.session_state.schema_model_to_use # Get the selected schema model
+
+            # Manage temporary directory
+            if st.session_state.temp_dir and os.path.exists(st.session_state.temp_dir):
+                 shutil.rmtree(st.session_state.temp_dir)
+            st.session_state.temp_dir = tempfile.mkdtemp()
+            temp_dir = st.session_state.temp_dir
+
+            with st.spinner("Processing... This may take a while."):
+                try:
+                    # --- Handle Input (Save/Extract to Temp Dir) ---
+                    current_source_info = st.session_state.get('source_info', {})
+                    temp_input_path = None # Path to the initial file in temp dir
+
+                    if uploaded_file and current_source_info.get("type") == "file":
+                        temp_input_path = os.path.join(temp_dir, uploaded_file.name)
+                        with open(temp_input_path, "wb") as f: f.write(uploaded_file.getbuffer())
+                        st.info(f"Using uploaded file: {uploaded_file.name}")
+                        if uploaded_file.name.lower().endswith(".pdf"):
+                            extracted_text_path = extract_text_from_file(temp_input_path, temp_dir, partition_func) # Pass partition_func
+                            if extracted_text_path and os.path.exists(extracted_text_path):
+                                with open(extracted_text_path, "r", encoding="utf-8") as f:
+                                    extracted_text_content = f.read()
+                                input_path_for_pipeline = None # Don't pass path for extracted text
                             else:
-                                st.info("No context information available for this paper.")
-                    elif view_options == "Raw Paper Text":
-                        with st.expander("Raw paper text", expanded=True):
-                            if "raw_text" in paper_info and paper_info["raw_text"]:
-                                st.text_area("Full paper text:", paper_info["raw_text"], height=400)
-                            else:
-                                st.info("Raw text not available for this paper.")
-                    else:  # All Information
-                        with st.expander("All paper information", expanded=True):
-                            st.subheader("Processed Data")
-                            st.json(paper_info.get("data", {}))
-                            st.subheader("Context Information")
-                            if "context" in paper_info and paper_info["context"]:
-                                st.json(paper_info["context"])
-                            else:
-                                st.info("No context information available for this paper.")
-                            st.subheader("Raw Paper Text")
-                            if "raw_text" in paper_info and paper_info["raw_text"]:
-                                st.text_area("Full paper text:", paper_info["raw_text"], height=300)
-                            else:
-                                st.info("Raw text not available for this paper.")
-                else:
-                    st.warning(f"Selected paper (ID: {selected_paper_id_key}) not found in processed list.")
+                                st.session_state.error_message = "Failed to extract text from PDF."
+                        else: # Assume XML
+                            input_path_for_pipeline = temp_input_path
+                            extracted_text_content = None
 
-            else: # "All processed papers" selected
-                with st.expander("All processed papers", expanded=False):
-                    for paper_id, paper in st.session_state.processed_papers.items():
-                        st.subheader(paper["title"])
-                        if view_options == "Processed Data":
-                            st.json(paper.get("data", {}))
-                        elif view_options == "Context Information":
-                            if "context" in paper and paper["context"]:
-                                st.json(paper["context"])
-                            else:
-                                st.info("No context information available for this paper.")
-                        elif view_options == "Raw Paper Text":
-                            if "raw_text" in paper and paper["raw_text"]:
-                                st.text_area(f"Full text of {paper['title']}", paper["raw_text"], height=200)
-                            else:
-                                st.info("Raw text not available for this paper.")
-                        else:  # All Information
-                            st.subheader("Processed Data")
-                            st.json(paper.get("data", {}))
-                            st.subheader("Context Information")
-                            if "context" in paper and paper["context"]:
-                                st.json(paper["context"])
-                            else:
-                                st.info("No context information available for this paper.")
-                            st.subheader("Raw Paper Text")
-                            if "raw_text" in paper and paper["raw_text"]:
-                                st.text_area(f"Full text of {paper['title']}", paper["raw_text"], height=200)
-                            else:
-                                st.info("Raw text not available for this paper.")
-                        st.divider()
+                    elif input_url_or_id and current_source_info.get("type") == "url_or_id":
+                        value = current_source_info.get("value", "")
+                        if is_pubmed_id(value):
+                            temp_input_path = fetch_xml_from_pubmed(value, temp_dir, save_xml) # Pass save_xml func
+                        elif value.lower().startswith("http"):
+                            temp_input_path = fetch_xml_from_url(value, temp_dir)
+                        else:
+                            st.error("Invalid input. Please provide a valid XML URL or PubMed ID.")
+                            st.session_state.error_message = "Invalid URL or PubMed ID."
 
-            # LLM context options
-            st.subheader("LLM Query Options")
-            context_options = st.multiselect(
-                "Include in LLM context:",
-                ["Processed Data", "Context Information", "Raw Paper Text"],
-                default=["Processed Data"]
-            )
+                        if temp_input_path and os.path.exists(temp_input_path):
+                            input_path_for_pipeline = temp_input_path
+                            extracted_text_content = None
+                            # Optional: Could still run extract_text_from_file here if needed for non-PDF URL content
+                            # extracted_text_path = extract_text_from_file(temp_input_path, temp_dir, partition_func)
+                            # if extracted_text_path: ... read content ... ; input_path_for_pipeline = None
+                        elif not st.session_state.error_message: # If fetch didn't already set an error
+                            st.session_state.error_message = "Failed to fetch or save input from URL/ID."
 
-            # Display chat history
-            st.subheader("Chat History")
-            chat_container = st.container(height=400)
-            with chat_container:
-                for message in st.session_state.chat_history[selected_paper_id_key]:
-                    with st.chat_message(message["role"]):
-                        st.write(message["content"])
+                    else:
+                         st.error("No valid input source detected.")
+                         st.session_state.error_message = "No input provided."
 
-            # Chat input
-            user_query = st.chat_input("Ask about the paper(s)...")
+                    # --- Run Pipeline ---
+                    # Check if we have either a valid path OR extracted text content AND no prior error
+                    if not st.session_state.error_message and ((input_path_for_pipeline and os.path.exists(input_path_for_pipeline)) or extracted_text_content):
+                        if schema_to_run:
+                            if call_inference:
+                                # Determine model based on UI choice
+                                if processing_model_choice == "OpenAI API":
+                                    selected_ff_model = "4o" # Or "4om"
+                                    st.info("Using OpenAI API for processing.")
+                                else:
+                                    selected_ff_model = "llama3.1I-8b-q4" # Default local
+                                    st.info("Using Local Model for processing.")
 
-            if user_query:
-                # Add user message to chat history
-                st.session_state.chat_history[selected_paper_id_key].append({
-                    "role": "user",
-                    "content": user_query
-                })
+                                pipeline_settings = { # TODO: Make similarity_k/field_info configurable via UI
+                                    'similarity_k': 5,
+                                    'field_info_to_compare': 'choices',
+                                    'ff_model': selected_ff_model
+                                }
 
-                # Display user message in chat history
-                with chat_container:
-                    with st.chat_message("user"):
-                        st.write(user_query)
+                                # Prepare arguments for call_inference
+                                inference_args = {
+                                    "schema": schema_to_run,
+                                    **pipeline_settings
+                                }
+                                if extracted_text_content:
+                                    inference_args["parsed_paper_text"] = extracted_text_content
+                                    st.info(f"Running pipeline on extracted text content with schema '{schema_to_run.__name__}'...")
+                                elif input_path_for_pipeline:
+                                    inference_args["paper_path"] = input_path_for_pipeline
+                                    st.info(f"Running pipeline on file '{os.path.basename(input_path_for_pipeline)}' with schema '{schema_to_run.__name__}'...")
+                                else: # Should not happen if the outer condition is met
+                                     st.error("Internal error: No valid input path or text content for pipeline.")
+                                     st.session_state.error_message = "Internal input error."
 
-                # Create context from paper data based on selected options
-                context_parts = []
-                context_intro = ""
+                                # Only run if no internal error
+                                if "error_message" not in st.session_state or st.session_state.error_message is None:
+                                    output = call_inference(**inference_args)
 
-                if selected_paper_id_key == "all":
-                    # Handling multiple papers
-                    context_intro = "Below is the information from multiple papers:"
-                    for paper_id, paper in st.session_state.processed_papers.items():
-                        paper_context = f"--- PAPER {paper_id}: {paper['title']} ---\n"
-                        if "Processed Data" in context_options:
-                            paper_context += f"\nPROCESSED DATA:\n{json.dumps(paper.get('data', {}), indent=2)}"
-                        if "Context Information" in context_options and "context" in paper and paper["context"]:
-                            paper_context += f"\nCONTEXT INFORMATION:\n{json.dumps(paper['context'], indent=2)}"
-                        if "Raw Paper Text" in context_options and "raw_text" in paper and paper["raw_text"]:
-                            raw_text = paper["raw_text"]
-                            if len(raw_text) > 10000: raw_text = raw_text[:10000] + "... [text truncated]"
-                            paper_context += f"\nRAW PAPER TEXT:\n{raw_text}"
-                        context_parts.append(paper_context)
-                    full_context = "\n\n".join(context_parts)
-
-                elif selected_paper_id_key in st.session_state.processed_papers:
-                    # Single paper
-                    paper = st.session_state.processed_papers[selected_paper_id_key]
-                    context_intro = f"Below is the information from the paper '{paper['title']}':"
-                    if "Processed Data" in context_options:
-                        context_parts.append(f"PROCESSED DATA:\n{json.dumps(paper.get('data', {}), indent=2)}")
-                    if "Context Information" in context_options and "context" in paper and paper["context"]:
-                        context_parts.append(f"CONTEXT INFORMATION:\n{json.dumps(paper['context'], indent=2)}")
-                    if "Raw Paper Text" in context_options and "raw_text" in paper and paper["raw_text"]:
-                        raw_text = paper["raw_text"]
-                        if len(raw_text) > 10000: raw_text = raw_text[:10000] + "... [text truncated]"
-                        context_parts.append(f"RAW PAPER TEXT:\n{raw_text}")
-                    full_context = "\n\n".join(context_parts)
-                else:
-                    full_context = "Error: Selected paper data not found."
-
-
-                # Create prompt for LLM only if context was built
-                if full_context:
-                    prompt = f"""You are a medical research assistant helping to analyze scientific papers.
-                    You are discussing {'multiple papers' if selected_paper_id_key == 'all' else 'a paper'}.
-                    {context_intro}
-
-                    {full_context}
-
-                    Based ONLY on the information provided above, please answer the following question:
-                    {user_query}
-
-                    If the answer cannot be determined from the provided information, state that clearly. Do not make assumptions or use external knowledge.
-                    """
-
-                    # Get response from LLM
-                    with chat_container:
-                        with st.chat_message("assistant"):
-                            with st.spinner("Thinking..."):
-                                try:
-                                    if 'llm' in st.session_state: # Check if LLM initialized
-                                        response = st.session_state.llm.ask(prompt, max_tokens=800, temperature=0.3)
-                                        st.write(response)
-                                        # Add assistant response to chat history
-                                        st.session_state.chat_history[selected_paper_id_key].append({
-                                            "role": "assistant",
-                                            "content": response
-                                        })
+                                    # [Output handling remains similar]
+                                    if output:
+                                        first_key = next(iter(output), None)
+                                        if first_key and isinstance(output[first_key], dict) and "filled_form" in output[first_key]:
+                                            st.session_state.processed_data = {
+                                                "form": output[first_key].get("filled_form", {}),
+                                                "context": output[first_key].get("context", {})
+                                            }
+                                            serializable_form = st.session_state.processed_data["form"]
+                                            if hasattr(serializable_form, 'dict'): serializable_form = serializable_form.dict()
+                                            st.session_state.edited_json = json.dumps(serializable_form, indent=4, default=str)
+                                            st.success("Pipeline completed successfully!")
+                                        else:
+                                            st.warning("Pipeline output structure unexpected. Using raw output.")
+                                            st.session_state.processed_data = {"form": output, "context": {}}
+                                            st.session_state.edited_json = json.dumps(output, indent=4, default=str)
+                                            st.success("Pipeline completed (structure might differ).")
                                     else:
-                                        st.error("LLM not initialized. Cannot generate response.")
-                                        st.session_state.chat_history[selected_paper_id_key].append({
-                                            "role": "assistant",
-                                            "content": "LLM not initialized."
-                                        })
-                                except Exception as e:
-                                    error_message = f"Error generating response: {str(e)}"
-                                    st.error(error_message)
-                                    # Add error to chat history
-                                    st.session_state.chat_history[selected_paper_id_key].append({
-                                        "role": "assistant",
-                                        "content": error_message
-                                    })
-                else:
-                     # Handle case where no context could be built
-                     with chat_container:
-                         with st.chat_message("assistant"):
-                             no_context_message = "Could not build context for the query based on selected options or paper data."
-                             st.warning(no_context_message)
-                             st.session_state.chat_history[selected_paper_id_key].append({
-                                 "role": "assistant",
-                                 "content": no_context_message
-                             })
+                                        st.error("Pipeline execution failed or returned no output.")
+                                        st.session_state.error_message = "Pipeline execution failed."
+                            else:
+                                st.error("Processing function (call_inference) is not available.")
+                                st.session_state.error_message = "Processing function unavailable."
+                        elif not st.session_state.error_message: # If no specific error yet
+                             if not schema_to_run: st.session_state.error_message = "Schema unavailable."
+                             # The condition below is now covered by the outer 'if'
+                             # elif not input_path_for_pipeline or not os.path.exists(input_path_for_pipeline): st.session_state.error_message = "Input file path invalid or missing after processing."
+
+                except Exception as e:
+                    st.error(f"An error occurred during processing: {e}")
+                    import traceback
+                    st.error(traceback.format_exc())
+                    st.session_state.error_message = str(e)
+
+    # --- Output Display and Editing ---
+    with st.container(border=True):
+        st.subheader("4. Review and Edit Results")
+        # [Display logic remains similar]
+        if st.session_state.processed_data and st.session_state.edited_json is not None:
+            st.info("Review the extracted data below. You can edit the JSON directly before saving or chatting.")
+            edited_json_state = st.text_area(
+                "Extracted Data (Editable JSON):", value=st.session_state.edited_json, height=400, key="json_edit_area"
+            )
+            if edited_json_state != st.session_state.edited_json:
+                st.session_state.edited_json = edited_json_state
+                st.caption("✏️ Changes detected in JSON. Remember to save if needed.")
+        elif st.session_state.error_message:
+            st.error(f"Processing failed: {st.session_state.error_message}")
+        else:
+            st.info("Process a paper using the button above to see results here.")
+
+    # --- Actions Section ---
+    with st.container(border=True):
+        st.subheader("5. Actions")
+        # [Actions logic remains similar]
+        if st.session_state.processed_data and st.session_state.edited_json is not None:
+            # Add input for custom dataset name
+            custom_dataset_name = st.text_input(
+                "Enter a name for this dataset (optional):",
+                placeholder=f"e.g., {st.session_state.source_info.get('name', 'My Processed Paper')}",
+                key="custom_dataset_name_input"
+            )
+
+            col1, col2 = st.columns(2)
+            with col1:
+                save_db_button = st.button("💾 Save to Database", key="save_db", use_container_width=True)
+                if save_db_button:
+                    if upsert_dataset:
+                        try:
+                            # Get potentially edited data from the text area
+                            edited_data = json.loads(st.session_state.edited_json)
+                            source_info = st.session_state.get('source_info', {})
+
+                            # --- Extract Key Identifiers ---
+                            # PMID: Prioritize from edited data, then source info if it was a pubmed id
+                            pmid = edited_data.get('pmid') or edited_data.get('PMID') # Check common casings
+                            if not pmid and source_info.get('type') == 'url_or_id' and is_pubmed_id(source_info.get('value','')):
+                                pmid = source_info.get('value')
+                            if not pmid or str(pmid).lower() == 'unknown': pmid = 'NO_PMID' # Use a clear placeholder
+
+                            # Accession: Prioritize from edited data, then generate a unique one
+                            accession = edited_data.get('accession') or edited_data.get('Accession')
+                            if not accession or str(accession).lower() == 'unknown':
+                                # Generate a more descriptive unique ID if possible
+                                base_name = custom_dataset_name.strip() or source_info.get('name', 'user_dataset')
+                                safe_base = re.sub(r'[^\w\-]+', '_', base_name).strip('_') if base_name else 'dataset'
+                                accession = f"USER_{safe_base}_{hash(st.session_state.edited_json) % 10000}" # Shorter hash
+
+                            # Title: Prioritize custom input, then edited data, then source filename
+                            title = custom_dataset_name.strip() or \
+                                    edited_data.get('title') or \
+                                    edited_data.get('Title') or \
+                                    source_info.get('name', f"Dataset {accession}") # Fallback
+
+                            # --- Prepare Data for Database ---
+                            db_data = {
+                                'title': title,
+                                'accession': accession,
+                                'pmid': pmid,
+                                'description': edited_data.get('description', 'User-provided dataset via Provider page.'),
+                                'organism': edited_data.get('organism'),
+                                'study_type': edited_data.get('study_type'),
+                                'source': 'user_provider', # Mark as user-provided
+                                'original_file': source_info.get('value', source_info.get('name', 'Unknown')),
+                                # Add other fields if they exist in edited_data
+                                'hardware': edited_data.get('hardware'),
+                                'organism_part': edited_data.get('organism_part'),
+                                'experimental_designs': edited_data.get('experimental_designs'),
+                                'assay_by_molecule': edited_data.get('assay_by_molecule'),
+                                # Add any other relevant fields your db_utils expects
+                            }
+
+                            # --- Save JSON and Update DB ---
+                            user_datasets_dir = os.path.join(project_root, 'llm_ui', 'app', 'user_datasets')
+                            os.makedirs(user_datasets_dir, exist_ok=True)
+                            # Use the potentially unique accession for the filename
+                            safe_filename = re.sub(r'[^\w\-_\.]', '_', f"user_dataset_{accession}.json")
+                            save_path = os.path.join(user_datasets_dir, safe_filename)
+
+                            # Save the potentially edited JSON data (the 'form' part)
+                            with open(save_path, "w") as f:
+                                json.dump(edited_data, f, indent=4)
+                            st.info(f"Saved dataset JSON to: {save_path}")
+
+                            # Add the file_path (primary key for DB) and upsert
+                            db_data['file_path'] = save_path
+                            upsert_dataset(db_data)
+                            st.success(f"Dataset '{title}' saved to database!")
+                        except json.JSONDecodeError: st.error("Cannot save to database: Edited JSON is invalid.")
+                        except Exception as e: st.error(f"Error saving to database: {e}"); import traceback; st.error(traceback.format_exc())
+                    else: st.error("Database function (upsert_dataset) is not available.")
+
+            with col2:
+                chat_button = st.button("💬 Chat with LLM", key="chat_llm", use_container_width=True)
+                if chat_button:
+                     # [Chat preparation logic remains similar]
+                    try:
+                        st.session_state.chat_context = {
+                            "processed_data": json.loads(st.session_state.edited_json),
+                            "context_info": st.session_state.processed_data.get("context", {}),
+                            "source": st.session_state.get('source_info', {})
+                        }
+                        st.success("Data prepared for chat.")
+                        st.info("Navigate to the 'Consumer QA' page from the sidebar to start chatting.")
+                    except json.JSONDecodeError: st.error("Cannot prepare for chat: Edited JSON is invalid.")
+                    except Exception as e: st.error(f"Error preparing for chat: {e}")
+        else:
+            st.info("Process a paper to enable actions.")
+
+    # --- Footer ---
+    st.markdown("---")
+    st.caption("Provider Page - Alpha Version")
+
+# Optional: Add a button to clear the temporary directory if needed
+# if st.session_state.temp_dir and os.path.exists(st.session_state.temp_dir):
+#     if st.button("Clean Temp Files"):
+#         try:
+#             shutil.rmtree(st.session_state.temp_dir)
+#             st.session_state.temp_dir = None
+#             st.success("Temporary files cleaned.")
+#         except Exception as e:
+#             st.error(f"Failed to clean temporary files: {e}")

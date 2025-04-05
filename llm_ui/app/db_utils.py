@@ -111,10 +111,17 @@ def upsert_dataset(metadata):
         '''
         cursor.execute(sql, data_tuple)
         conn.commit()
+        print(f"[DB_UTILS] Successfully upserted single record: {metadata.get('file_path')}") # Add success print
     except sqlite3.Error as e:
         print(f"[ERROR][DB_UTILS] Database error during single upsert for {metadata.get('file_path')}: {e}")
+        print(f"  SQLite Error Code: {e.sqlite_errorcode}")
+        print(f"  SQLite Error Name: {e.sqlite_errorname}")
+        print(f"  SQL: {sql}")
+        print(f"  Data tuple ({len(data_tuple)} items): {data_tuple}") # Print data that caused error
     except Exception as e:
          print(f"[ERROR][DB_UTILS] Unexpected error during single upsert for {metadata.get('file_path')}: {e}")
+         print(f"  Metadata: {metadata}") # Print metadata that caused error
+         print(f"  Data tuple: {data_tuple}")
     finally:
         if conn:
             conn.close()
@@ -139,21 +146,56 @@ def batch_upsert_datasets(metadata_list):
             INSERT OR REPLACE INTO datasets ({', '.join(columns)})
             VALUES ({', '.join(['?'] * len(columns))})
         '''
+        # Use a transaction for batch insert
+        conn.execute("BEGIN TRANSACTION")
         cursor.executemany(sql, data_tuples)
         conn.commit()
         inserted_count = len(metadata_list)
         # print(f"[DB_UTILS] Batch upserted {inserted_count} records.")
     except sqlite3.Error as e:
         print(f"[ERROR][DB_UTILS] Database error during batch upsert: {e}")
+        if conn: conn.rollback() # Rollback transaction on error
         # Optionally try individual upserts as fallback here
+        print(f"  Attempting individual upserts for failed batch...")
+        failed_count = 0
+        for metadata in metadata_list:
+             try:
+                 upsert_dataset(metadata) # Fallback to individual insert
+             except Exception as individual_e:
+                 failed_count += 1
+                 print(f"[ERROR][DB_UTILS] Individual upsert failed for {metadata.get('file_path')} after batch failure: {individual_e}")
+        print(f"  Individual upsert fallback completed with {failed_count} failures.")
+
     except Exception as e:
          print(f"[ERROR][DB_UTILS] Unexpected error during batch upsert: {e}")
+         if conn: conn.rollback()
     finally:
         if conn:
             conn.close()
     return inserted_count
 
 # --- Metadata Extraction Helpers ---
+def _fetch_pubmed_title(pmid):
+    """Fetches the title for a given PMID from PubMed."""
+    if not pmid or pmid == 'unknown' or not str(pmid).isdigit():
+        return None
+    try:
+        pubmed_url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id={pmid}&retmode=xml"
+        response = requests.get(pubmed_url, timeout=10)
+        time.sleep(0.4) # Be nice to NCBI
+        response.raise_for_status()
+        root = ET.fromstring(response.text)
+        article_title = root.find(".//ArticleTitle")
+        if article_title is not None and article_title.text:
+            return article_title.text
+    except requests.exceptions.RequestException as e:
+        print(f"[WARN][DB_UTILS] Network error fetching title for PMID {pmid}: {e}")
+    except ET.ParseError as e:
+        print(f"[WARN][DB_UTILS] XML parsing error for PMID {pmid}: {e}")
+    except Exception as e:
+        print(f"[WARN][DB_UTILS] Unexpected error fetching title for PMID {pmid}: {e}")
+    return None
+
 def _extract_metadata_for_db(file_path):
     """Helper to extract metadata from a JSON file for DB insertion. Returns metadata dict or None."""
     try:
@@ -171,7 +213,7 @@ def _extract_metadata_for_db(file_path):
     accession = accession_match.group(1) if accession_match else (user_accession_match.group(1) if user_accession_match else data.get('accession', 'Unknown'))
 
     metadata = {'file_path': file_path, 'accession': accession, 'pmid': pmid}
-    metadata.update({k: None for k in [ # Initialize all other DB fields to None
+    metadata.update({k: None for k in [
         'title', 'organism', 'study_type', 'description', 'source', 'hardware',
         'organism_part', 'experimental_designs', 'assay_by_molecule', 'technology',
         'sample_count', 'release_date', 'experimental_factors']})
@@ -188,11 +230,11 @@ def _extract_metadata_for_db(file_path):
     else:
         metadata['source'] = 'arrayexpress'
         if isinstance(data, dict):
-            # Simplified extraction from potential ArrayExpress structure
-            metadata['title'] = data.get('title', metadata['title'])
-            metadata['description'] = data.get('description', metadata['description'])
-            metadata['organism'] = data.get('organism', metadata['organism'])
-            metadata['study_type'] = data.get('study_type', data.get('study type', metadata['study_type']))
+            data_lower = {k.lower(): v for k, v in data.items() if isinstance(k, str)}
+            metadata['title'] = data_lower.get('title', metadata['title'])
+            metadata['description'] = data_lower.get('description', metadata['description'])
+            metadata['organism'] = data_lower.get('organism', metadata['organism'])
+            metadata['study_type'] = data_lower.get('study type', data_lower.get('study_type', metadata['study_type']))
 
             if 'section' in data:
                  sections = data['section'] if isinstance(data['section'], list) else [data['section']]
@@ -215,26 +257,32 @@ def _extract_metadata_for_db(file_path):
                                   if attr_name == 'organism' and not metadata['organism']: metadata['organism'] = attr['value']
                                   elif attr_name == 'study type' and not metadata['study_type']: metadata['study_type'] = attr['value']
                                   elif attr_name == 'release date' and not metadata['release_date']: metadata['release_date'] = attr['value']
-                     # Simplified extraction for other fields - add more as needed
+
                      subsections = section.get('subsections', [])
                      if isinstance(subsections, dict): subsections = [subsections]
                      if isinstance(subsections, list):
                           for sub in subsections:
                               if not isinstance(sub, dict): continue
+                              sub_type = sub.get('type', '').lower()
                               sub_attributes = sub.get('attributes', [])
                               if isinstance(sub_attributes, dict): sub_attributes = [sub_attributes]
                               for attr in sub_attributes:
                                    if isinstance(attr, dict) and 'name' in attr and 'value' in attr:
                                        attr_name = attr['name'].lower()
-                                       if attr_name == 'organism part' and not metadata['organism_part']: metadata['organism_part'] = attr['value']
-                                       # Add other fields like hardware, technology, etc.
+                                       if attr_name == 'sample count' and not metadata['sample_count']: metadata['sample_count'] = attr['value']
+                                       elif attr_name == 'experimental factors' and not metadata['experimental_factors']: metadata['experimental_factors'] = attr['value']
+                                       elif attr_name == 'hardware' and not metadata['hardware']: metadata['hardware'] = attr['value']
+                                       elif attr_name == 'technology' and not metadata['technology']: metadata['technology'] = attr['value']
+                                       elif attr_name == 'organism part' and not metadata['organism_part']: metadata['organism_part'] = attr['value']
+                                       elif attr_name == 'organism' and not metadata['organism']: metadata['organism'] = attr['value']
+                                       elif attr_name == 'assay by molecule' and not metadata['assay_by_molecule']: metadata['assay_by_molecule'] = attr['value']
 
-    # Set default title if still None (will be updated later by PubMed fetch)
+    # Set default title (will be updated later if possible)
     if not metadata.get('title'): metadata['title'] = f"Dataset {accession}"
     if not metadata.get('organism'): metadata['organism'] = "Unknown"
     if not metadata.get('study_type'): metadata['study_type'] = "Unknown"
 
-    # Convert all values to string for consistency before returning (but keep None as None)
+    # Convert all values to string for consistency
     for key in metadata:
         if metadata[key] is not None:
             metadata[key] = str(metadata[key])
@@ -254,12 +302,12 @@ def _extract_metadata_from_bulk_entry(entry_data, pmid, file_basename):
         'source': 'bulk_processed',
         'file_path': f"{file_basename}#PMID{pmid}", # Pseudo-path
     }
-    metadata.update({k: None for k in [ # Initialize other fields
+    metadata.update({k: None for k in [
         'hardware', 'organism_part', 'experimental_designs', 'assay_by_molecule',
         'technology', 'sample_count', 'release_date', 'experimental_factors']})
 
     if isinstance(entry_data, dict):
-        field_mappings = { # Map canonical names to potential indexed keys
+        field_mappings = {
             'organism': ['organism_16', 'organism_17'], 'study_type': ['study_type_18'],
             'hardware': ['hardware_4'], 'organism_part': ['organism_part_5'],
             'experimental_designs': ['experimental_designs_10'], 'assay_by_molecule': ['assay_by_molecule_14'],
@@ -282,7 +330,7 @@ def _extract_metadata_from_bulk_entry(entry_data, pmid, file_basename):
             if not found_value and canonical_field in ['organism', 'study_type']:
                  metadata[canonical_field] = "Unknown"
 
-    # Set default title if still None (will be updated later)
+    # Set default title (will be updated later)
     if not metadata.get('title') or metadata['title'].startswith("PMID:"):
         metadata['title'] = f"PMID: {pmid} from {file_basename}"
     if not metadata.get('organism'): metadata['organism'] = "Unknown"
@@ -299,31 +347,31 @@ def _extract_metadata_from_bulk_entry(entry_data, pmid, file_basename):
 def _fetch_pubmed_titles_batch(pmids):
     """Fetches titles for a batch of PMIDs."""
     titles = {}
-    if not pmids: return titles
-    pmid_list = ",".join(filter(None, pmids))
-    if not pmid_list: return titles
+    valid_pmids = [p for p in pmids if p and str(p).isdigit()]
+    if not valid_pmids: return titles
+    pmid_list = ",".join(valid_pmids)
 
-    print(f"[DB_UTILS] Fetching titles for {len(pmids)} PMIDs...")
+    print(f"[DB_UTILS] Fetching titles for {len(valid_pmids)} PMIDs...")
     try:
         pubmed_url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id={pmid_list}&retmode=xml"
-        response = requests.get(pubmed_url, timeout=20) # Longer timeout for batch
-        time.sleep(0.5) # Be nice to NCBI
-        if response.status_code == 200:
-            root = ET.fromstring(response.text)
-            for article in root.findall(".//PubmedArticle"):
-                pmid_elem = article.find(".//PMID")
-                if pmid_elem is not None and pmid_elem.text:
-                    pmid = pmid_elem.text
-                    article_title = article.find(".//ArticleTitle")
-                    if article_title is not None and article_title.text:
-                        titles[pmid] = article_title.text
+        response = requests.get(pubmed_url, timeout=20)
+        time.sleep(0.4) # Be nice to NCBI
+        response.raise_for_status()
+        root = ET.fromstring(response.text)
+        for article in root.findall(".//PubmedArticle"):
+            pmid_elem = article.find(".//PMID")
+            if pmid_elem is not None and pmid_elem.text:
+                pmid = pmid_elem.text
+                article_title = article.find(".//ArticleTitle")
+                if article_title is not None and article_title.text:
+                    titles[pmid] = article_title.text
     except requests.exceptions.RequestException as e:
         print(f"[WARN][DB_UTILS] Network error fetching PubMed batch: {e}")
     except ET.ParseError as e:
         print(f"[WARN][DB_UTILS] XML parsing error for PubMed batch: {e}")
     except Exception as e:
         print(f"[WARN][DB_UTILS] Unexpected error fetching PubMed batch: {e}")
-    print(f"[DB_UTILS] Fetched {len(titles)} titles.")
+    print(f"[DB_UTILS] Fetched {len(titles)} titles for batch.")
     return titles
 
 def update_titles_from_pubmed(batch_size=100):
@@ -333,11 +381,10 @@ def update_titles_from_pubmed(batch_size=100):
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        # Find entries with placeholder titles and valid PMIDs
         sql_select = """
             SELECT file_path, pmid FROM datasets
             WHERE pmid IS NOT NULL AND pmid != 'unknown' AND pmid != ''
-            AND (title IS NULL OR title = 'Unknown' OR title LIKE 'Dataset %' OR title LIKE 'PMID:%')
+            AND (title IS NULL OR title = 'Unknown' OR title LIKE 'Dataset %' OR title LIKE 'PMID:%' OR title LIKE 'User Dataset %')
         """
         cursor.execute(sql_select)
         records_to_update = cursor.fetchall()
@@ -356,11 +403,13 @@ def update_titles_from_pubmed(batch_size=100):
             updates = []
             for pmid, title in fetched_titles.items():
                 if pmid in pmid_map:
-                    updates.append((title, pmid_map[pmid])) # Prepare (title, file_path) for update
+                    updates.append((title, pmid_map[pmid]))
 
             if updates:
-                sql_update = "UPDATE datasets SET title = ? WHERE file_path = ?"
-                cursor.executemany(sql_update, updates)
+                sql_update = "UPDATE datasets SET title = ?, last_updated = ? WHERE file_path = ?"
+                now = datetime.now()
+                updates_with_ts = [(title, now, file_path) for title, file_path in updates]
+                cursor.executemany(sql_update, updates_with_ts)
                 conn.commit()
                 updated_count += len(updates)
                 print(f"[DB_UTILS] Updated {len(updates)} titles in batch {i//batch_size + 1}. Total updated: {updated_count}")
@@ -382,7 +431,7 @@ def scan_and_update_db(directories):
     all_files_found = []
     processed_count = 0
     bulk_processed_count = 0
-    batch_size = 500 # Process DB inserts in batches
+    batch_size = 500
     metadata_batch = []
 
     for directory in directories:
@@ -428,8 +477,7 @@ def scan_and_update_db(directories):
             if len(metadata_batch) >= batch_size:
                 batch_upsert_datasets(metadata_batch)
                 print(f"[DB_UTILS] Processed batch of {len(metadata_batch)} individual files (Total: {processed_count})...")
-                metadata_batch = [] # Clear batch
-    # Process any remaining individual files
+                metadata_batch = []
     if metadata_batch:
         batch_upsert_datasets(metadata_batch)
         print(f"[DB_UTILS] Processed final batch of {len(metadata_batch)} individual files (Total: {processed_count}).")
@@ -454,12 +502,10 @@ def scan_and_update_db(directories):
                 print(f"[WARN][DB_UTILS] Bulk file {file_path} is not a dictionary. Skipping.")
         except Exception as e:
             print(f"[ERROR][DB_UTILS] Error processing bulk file {file_path}: {e}")
-    # Process any remaining bulk entries
     if metadata_batch:
         batch_upsert_datasets(metadata_batch)
         print(f"[DB_UTILS] Processed final batch of {len(metadata_batch)} bulk entries (Total: {bulk_processed_count}).")
 
-    # --- Update Titles from PubMed ---
     print("[DB_UTILS] Starting PubMed title update process...")
     update_titles_from_pubmed()
 
@@ -478,25 +524,20 @@ def get_dataset_count(search_term=None):
         params = []
         if search_term:
             search_pattern = f"%{search_term}%"
-            # Ensure all columns used in WHERE clause exist in the table
-            # Added organism_part, experimental_factors, technology to the search
             sql += """
                 WHERE (accession LIKE ? OR pmid LIKE ? OR title LIKE ? OR
                       organism LIKE ? OR study_type LIKE ? OR description LIKE ? OR
                       organism_part LIKE ? OR technology LIKE ? OR experimental_factors LIKE ?)
             """
-            params = [search_pattern] * 9 # Increased count to match WHERE clauses
+            params = [search_pattern] * 9
 
         cursor.execute(sql, params)
         result = cursor.fetchone()
-        if result:
-             count = result[0]
-        # print(f"[DB_UTILS] get_dataset_count (term: {search_term}): {count}") # Keep this less verbose
+        if result: count = result[0]
     except sqlite3.Error as e:
         print(f"[ERROR][DB_UTILS] Database error counting datasets: {e}")
     finally:
-        if conn:
-            conn.close()
+        if conn: conn.close()
     return count
 
 def get_datasets_page(page_number, page_size, search_term=None):
@@ -507,9 +548,6 @@ def get_datasets_page(page_number, page_size, search_term=None):
         conn = get_db_connection()
         cursor = conn.cursor()
         offset = page_number * page_size
-
-        # Select columns needed for display and identification
-        # Added organism_part, technology etc. for potential display/use and search verification
         select_cols = [
             'file_path', 'accession', 'pmid', 'title', 'organism', 'study_type',
             'description', 'source', 'organism_part', 'technology', 'sample_count',
@@ -521,91 +559,81 @@ def get_datasets_page(page_number, page_size, search_term=None):
 
         if search_term:
             search_pattern = f"%{search_term}%"
-            # Ensure all columns used in WHERE clause exist
             sql += """
                 WHERE (accession LIKE ? OR pmid LIKE ? OR title LIKE ? OR
                       organism LIKE ? OR study_type LIKE ? OR description LIKE ? OR
                       organism_part LIKE ? OR technology LIKE ? OR experimental_factors LIKE ?)
             """
-            params = [search_pattern] * 9 # Increased count
+            params = [search_pattern] * 9
 
-        sql += " ORDER BY accession LIMIT ? OFFSET ?" # Order consistently
+        sql += " ORDER BY accession LIMIT ? OFFSET ?"
         params.extend([page_size, offset])
 
-        # print(f"[DB_UTILS] Executing SQL: {sql}") # Debug SQL
-        # print(f"[DB_UTILS] With Params: {params}") # Debug Params
         cursor.execute(sql, params)
         datasets = [dict(row) for row in cursor.fetchall()]
-        # print(f"[DB_UTILS] Fetched {len(datasets)} datasets for page {page_number}") # Keep less verbose
     except sqlite3.Error as e:
         print(f"[ERROR][DB_UTILS] Database error fetching page: {e}")
         print(f"  SQL: {sql}")
         print(f"  Params: {params}")
     finally:
-        if conn:
-            conn.close()
+        if conn: conn.close()
     return datasets
 
 def get_datasets_by_ids(ids):
     """Gets full dataset details for a list of IDs (accession or file_path)."""
-    if not ids:
-        return []
+    if not ids: return []
     conn = None
     datasets = []
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
         placeholders = ', '.join('?' for _ in ids)
-        # Query primarily by accession as it's more likely to be the stable ID used in selection
         sql = f"SELECT * FROM datasets WHERE accession IN ({placeholders})"
-        print(f"[DB_UTILS] Fetching datasets by ID (Accession): {ids}") # Debug fetch
+        print(f"[DB_UTILS] Fetching datasets by ID (Accession): {ids}")
 
-        cursor.execute(sql, list(ids)) # Ensure ids is a list
+        cursor.execute(sql, list(ids))
         datasets_by_accession = {dict(row)['accession']: dict(row) for row in cursor.fetchall()}
 
-        # Find IDs that weren't matched by accession
         found_accessions = set(datasets_by_accession.keys())
         missing_ids = [id_ for id_ in ids if id_ not in found_accessions]
 
-        # Try matching missing IDs by file_path
         if missing_ids:
              print(f"[DB_UTILS] Accessions not found, trying file_path for: {missing_ids}")
              placeholders_path = ', '.join('?' for _ in missing_ids)
              sql_path = f"SELECT * FROM datasets WHERE file_path IN ({placeholders_path})"
              cursor.execute(sql_path, missing_ids)
              for row in cursor.fetchall():
-                 # Add only if not already found via accession (avoids duplicates if ID matches both)
                  ds_dict = dict(row)
-                 # Use file_path as key if accession was missing/duplicate from file_path search
                  dict_key = ds_dict.get('accession', ds_dict.get('file_path'))
                  if dict_key not in datasets_by_accession:
                       datasets_by_accession[dict_key] = ds_dict
 
     except sqlite3.Error as e:
         print(f"[ERROR][DB_UTILS] Database error fetching by IDs: {e}")
-        print(f"  SQL used: {sql}") # Print SQL that might have failed
+        print(f"  SQL used: {sql}")
         print(f"  IDs: {list(ids)}")
     except Exception as e:
          print(f"[ERROR][DB_UTILS] Unexpected error fetching by IDs: {e}")
     finally:
-        if conn:
-            conn.close()
+        if conn: conn.close()
 
-    # Return the found datasets as a list of dictionaries
-    print(f"[DB_UTILS] Returning {len(datasets_by_accession)} datasets for IDs: {ids}") # Debug return
+    print(f"[DB_UTILS] Returning {len(datasets_by_accession)} datasets for IDs: {ids}")
     return list(datasets_by_accession.values())
 
 
 if __name__ == '__main__':
-    # Example usage: Initialize DB when script is run directly
     print(f"Database path: {DB_PATH}")
     init_db()
-    # Example scan (adjust paths as needed for your environment)
     print("[DB_UTILS] Running example scan...")
     scan_directories = [
-        # os.path.join(project_root, 'data'), # Scan original data dir - uncomment if needed
-        # os.path.join(project_root, 'data', 'arxpr'), # Scan original data dir - uncomment if needed
+        os.path.join(project_root, 'data'), # Scan data dir for bulk files
+        os.path.join(project_root, 'data', 'arxpr'), # Scan for individual ArrayExpress files
+        "/mnt/data/upcast/data/arxpr", # Scan mounted data path
         USER_DATASETS_DIR # Scan user saved dir
     ]
-    # scan_and_update_db(scan_directories) # Commented out by default
+    valid_scan_dirs = [d for d in scan_directories if os.path.isdir(d)]
+    if valid_scan_dirs:
+        scan_and_update_db(valid_scan_dirs)
+    else:
+        print("[DB_UTILS] No valid directories found for example scan.")
     print("[DB_UTILS] DB Utils script finished.")
