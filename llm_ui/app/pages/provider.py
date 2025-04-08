@@ -10,6 +10,7 @@ from pydantic import create_model, Field
 from typing import Optional, Any, List, Dict, Union
 from urllib.parse import urlparse
 import shutil # For cleaning up temp dirs
+import xml.etree.ElementTree as ET # For parsing XML
 
 # Add project root and profiler directory to path for imports
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
@@ -57,6 +58,74 @@ def import_dependencies():
 
 # Error display moved after st.title
 # Dependency loading moved after st.title
+
+def _try_extract_pmid(file_path: str) -> Optional[str]:
+    """Attempts to extract a PMID from XML/HTML or text content."""
+    if not file_path or not os.path.exists(file_path):
+        print(f"[_try_extract_pmid] File path invalid or file does not exist: {file_path}")
+        return None
+
+    pmid = None
+    content = ""
+    file_processed_for_content = False
+
+    # 1. Try parsing as XML
+    if file_path.lower().endswith(".xml"):
+        try:
+            tree = ET.parse(file_path)
+            root = tree.getroot()
+            # Look for <article-id pub-id-type="pmid">...</article-id>
+            # More robust search using XPath, ignoring namespaces
+            pmid_elem = root.find(".//{*}article-id[@pub-id-type='pmid']")
+            if pmid_elem is not None and pmid_elem.text and pmid_elem.text.strip().isdigit():
+                pmid = pmid_elem.text.strip()
+                print(f"[_try_extract_pmid] Found PMID {pmid} via XML tag <article-id>.")
+                return pmid # Found via specific XML tag, return immediately
+
+            # Look for <PMID>...</PMID> (simpler structure)
+            # More robust search using XPath, ignoring namespaces
+            pmid_elem = root.find(".//{*}PMID")
+            if pmid_elem is not None and pmid_elem.text and pmid_elem.text.strip().isdigit():
+                pmid = pmid_elem.text.strip()
+                print(f"[_try_extract_pmid] Found PMID {pmid} via XML tag <PMID>.")
+                return pmid # Found via specific XML tag, return immediately
+
+            # If specific tags not found, prepare to read content for regex
+            print(f"[_try_extract_pmid] XML parsed but no specific PMID tag found in {os.path.basename(file_path)}. Will check content via regex.")
+
+        except ET.ParseError:
+            print(f"[_try_extract_pmid] File {os.path.basename(file_path)} is not valid XML. Will check content via regex.")
+            # Proceed to read content below
+        except Exception as xml_err:
+            print(f"[_try_extract_pmid] Error processing XML {os.path.basename(file_path)}: {xml_err}. Will check content via regex.")
+            # Proceed to read content below
+
+    # 2. Read content (if not found via XML tags or if not XML) for regex check
+    # Avoid reading again if XML parsing failed but reading succeeded below
+    if not pmid:
+        try:
+            # Read beginning of file, increase size slightly
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read(15000)
+            file_processed_for_content = True
+        except Exception as read_err:
+            print(f"[_try_extract_pmid] Error reading file {os.path.basename(file_path)} for regex: {read_err}")
+            # Can't proceed if reading fails
+            return None
+
+    # 3. Try regex on content (if read successfully)
+    if file_processed_for_content and content:
+        # Regex for PMID: optional space/colon/hyphen, 7-9 digits, word boundaries, case-insensitive
+        # Added flexibility for variations like "PubMed ID:"
+        match = re.search(r'\b(?:PMID|PubMed\s*ID)\s*[:\-]?\s*(\d{7,9})\b', content, re.IGNORECASE)
+        if match and match.group(1):
+            pmid = match.group(1)
+            print(f"[_try_extract_pmid] Found PMID {pmid} via regex.")
+            return pmid # Found via regex
+
+    # 4. If no PMID found after all checks
+    print(f"[_try_extract_pmid] No PMID found in {os.path.basename(file_path)} after XML and regex checks.")
+    return None
 
 def is_pubmed_id(input_string):
     """Check if the input string looks like a PubMed ID (numeric)."""
@@ -309,17 +378,42 @@ def show():
         if input_method == "Upload File":
             uploaded_file = st.file_uploader("Upload XML or PDF file", type=["xml", "pdf"], key="file_uploader")
             if uploaded_file:
-                if st.session_state.source_info is None or st.session_state.source_info.get("name") != uploaded_file.name:
-                     st.session_state.source_info = {"type": "file", "name": uploaded_file.name}
+                # Check if it's a new file upload
+                is_new_file = (st.session_state.source_info is None or
+                               st.session_state.source_info.get("type") != "file" or
+                               st.session_state.source_info.get("name") != uploaded_file.name)
+
+                if is_new_file:
+                     st.session_state.source_info = {"type": "file", "name": uploaded_file.name, "pmid_candidate": None} # Initialize pmid_candidate
                      # Clear results on new input
                      st.session_state.processed_data = None; st.session_state.edited_json = None; st.session_state.error_message = None
+
+                     # --- Attempt to extract PMID from filename ---
+                     filename_match = re.match(r'^(\d{7,9})___', uploaded_file.name)
+                     pmid_from_filename = filename_match.group(1) if filename_match else None
+                     if pmid_from_filename:
+                          st.session_state.source_info['pmid_candidate'] = pmid_from_filename
+                          print(f"[Provider] Found potential PMID {pmid_from_filename} from filename.")
+                          st.info(f"Debug: PMID from filename: {pmid_from_filename}") # DEBUG
+                     # We will attempt content extraction later, after saving the file
         else:
             input_url_or_id_value = st.text_input("Enter XML URL or PubMed ID", key="url_input")
             if input_url_or_id_value:
-                 if st.session_state.source_info is None or st.session_state.source_info.get("value") != input_url_or_id_value:
-                      st.session_state.source_info = {"type": "url_or_id", "value": input_url_or_id_value}
+                 # Check if it's a new URL/ID input
+                 is_new_url_id = (st.session_state.source_info is None or
+                                  st.session_state.source_info.get("type") != "url_or_id" or
+                                  st.session_state.source_info.get("value") != input_url_or_id_value)
+
+                 if is_new_url_id:
+                      st.session_state.source_info = {"type": "url_or_id", "value": input_url_or_id_value, "pmid_candidate": None} # Initialize pmid_candidate
                       # Clear results on new input
                       st.session_state.processed_data = None; st.session_state.edited_json = None; st.session_state.error_message = None
+
+                      # --- Store PMID if input is directly an ID ---
+                      if is_pubmed_id(input_url_or_id_value):
+                           st.session_state.source_info['pmid_candidate'] = input_url_or_id_value
+                           print(f"[Provider] Input is PMID: {input_url_or_id_value}.")
+                      # We will attempt content extraction later, after fetching the URL
                  input_url_or_id = input_url_or_id_value
 
     # --- Schema Selection ---
@@ -424,14 +518,31 @@ def show():
                         temp_input_path = os.path.join(temp_dir, uploaded_file.name)
                         with open(temp_input_path, "wb") as f: f.write(uploaded_file.getbuffer())
                         st.info(f"Using uploaded file: {uploaded_file.name}")
+                        # --- Try extracting PMID from content (after saving) ---
+                        pmid_from_content = _try_extract_pmid(temp_input_path)
+                        if pmid_from_content:
+                              # Prioritize content over filename
+                              st.session_state.source_info['pmid_candidate'] = pmid_from_content
+                              print(f"[Provider] Found potential PMID {pmid_from_content} from file content.")
+                              st.info(f"Debug: PMID from content (upload): {pmid_from_content}") # DEBUG
+                         # ----------------------------------------------------
+
                         if uploaded_file.name.lower().endswith(".pdf"):
                             extracted_text_path = extract_text_from_file(temp_input_path, temp_dir, partition_func) # Pass partition_func
                             if extracted_text_path and os.path.exists(extracted_text_path):
                                 with open(extracted_text_path, "r", encoding="utf-8") as f:
                                     extracted_text_content = f.read()
                                 input_path_for_pipeline = None # Don't pass path for extracted text
+                                # --- Try extracting PMID from extracted PDF text ---
+                                pmid_from_pdf_text = _try_extract_pmid(extracted_text_path)
+                                if pmid_from_pdf_text:
+                                     # Prioritize content over filename
+                                     st.session_state.source_info['pmid_candidate'] = pmid_from_pdf_text
+                                     print(f"[Provider] Found potential PMID {pmid_from_pdf_text} from extracted PDF text.")
+                                     st.info(f"Debug: PMID from PDF text: {pmid_from_pdf_text}") # DEBUG
+                                 # --------------------------------------------------
                             else:
-                                st.session_state.error_message = "Failed to extract text from PDF."
+                                 st.session_state.error_message = "Failed to extract text from PDF."
                         else: # Assume XML
                             input_path_for_pipeline = temp_input_path
                             extracted_text_content = None
@@ -439,9 +550,18 @@ def show():
                     elif input_url_or_id and current_source_info.get("type") == "url_or_id":
                         value = current_source_info.get("value", "")
                         if is_pubmed_id(value):
+                            # PMID was already stored in source_info['pmid_candidate']
                             temp_input_path = fetch_xml_from_pubmed(value, temp_dir, save_xml) # Pass save_xml func
                         elif value.lower().startswith("http"):
                             temp_input_path = fetch_xml_from_url(value, temp_dir)
+                            # --- Try extracting PMID from fetched URL content ---
+                            if temp_input_path and os.path.exists(temp_input_path):
+                                 pmid_from_content = _try_extract_pmid(temp_input_path)
+                                 if pmid_from_content:
+                                      st.session_state.source_info['pmid_candidate'] = pmid_from_content
+                                      print(f"[Provider] Found potential PMID {pmid_from_content} from URL content.")
+                                      st.info(f"Debug: PMID from URL content: {pmid_from_content}") # DEBUG
+                             # ----------------------------------------------------
                         else:
                             st.error("Invalid input. Please provide a valid XML URL or PubMed ID.")
                             st.session_state.error_message = "Invalid URL or PubMed ID."
@@ -449,9 +569,9 @@ def show():
                         if temp_input_path and os.path.exists(temp_input_path):
                             input_path_for_pipeline = temp_input_path
                             extracted_text_content = None
-                            # Optional: Could still run extract_text_from_file here if needed for non-PDF URL content
+                            # Optional: Could still run extract_text_from_file here if needed for non-XML/HTML URL content
                             # extracted_text_path = extract_text_from_file(temp_input_path, temp_dir, partition_func)
-                            # if extracted_text_path: ... read content ... ; input_path_for_pipeline = None
+                            # if extracted_text_path: ... read content ... ; input_path_for_pipeline = None; _try_extract_pmid(extracted_text_path) ...
                         elif not st.session_state.error_message: # If fetch didn't already set an error
                             st.session_state.error_message = "Failed to fetch or save input from URL/ID."
 
@@ -460,11 +580,12 @@ def show():
                          st.session_state.error_message = "No input provided."
 
                     # --- Run Pipeline ---
-                    # Check if we have either a valid path OR extracted text content AND no prior error
+                     # Check if we have either a valid path OR extracted text content AND no prior error
                     if not st.session_state.error_message and ((input_path_for_pipeline and os.path.exists(input_path_for_pipeline)) or extracted_text_content):
-                        if schema_to_run:
-                            if call_inference:
-                                # Determine model based on UI choice
+                         if schema_to_run:
+                             st.info(f"Debug: PMID candidate before pipeline: {st.session_state.get('source_info', {}).get('pmid_candidate')}") # DEBUG
+                             if call_inference:
+                                 # Determine model based on UI choice
                                 if processing_model_choice == "OpenAI API":
                                     selected_ff_model = "4o" # Or "4om"
                                     st.info("Using OpenAI API for processing.")
@@ -517,11 +638,11 @@ def show():
                                     else:
                                         st.error("Pipeline execution failed or returned no output.")
                                         st.session_state.error_message = "Pipeline execution failed."
-                            else:
+                             else:
                                 st.error("Processing function (call_inference) is not available.")
                                 st.session_state.error_message = "Processing function unavailable."
-                        elif not st.session_state.error_message: # If no specific error yet
-                             if not schema_to_run: st.session_state.error_message = "Schema unavailable."
+                    elif not st.session_state.error_message: # If no specific error yet
+                            if not schema_to_run: st.session_state.error_message = "Schema unavailable."
                              # The condition below is now covered by the outer 'if'
                              # elif not input_path_for_pipeline or not os.path.exists(input_path_for_pipeline): st.session_state.error_message = "Input file path invalid or missing after processing."
 
@@ -570,14 +691,18 @@ def show():
                             edited_data = json.loads(st.session_state.edited_json)
                             source_info = st.session_state.get('source_info', {})
 
-                            # --- Extract Key Identifiers ---
-                            # PMID: Prioritize from edited data, then source info if it was a pubmed id
-                            pmid = edited_data.get('pmid') or edited_data.get('PMID') # Check common casings
-                            if not pmid and source_info.get('type') == 'url_or_id' and is_pubmed_id(source_info.get('value','')):
-                                pmid = source_info.get('value')
+                             # --- Extract Key Identifiers ---
+                             # PMID: Prioritize candidate from source_info, then edited data
+                            pmid_candidate = source_info.get('pmid_candidate')
+                            st.info(f"Debug (Save): PMID Candidate from source_info: {pmid_candidate}") # DEBUG
+                            pmid_from_edited = edited_data.get('pmid') or edited_data.get('PMID') # Check common casings
+                            st.info(f"Debug (Save): PMID from edited_data: {pmid_from_edited}") # DEBUG
+                            pmid = pmid_candidate or pmid_from_edited # Check candidate first
+                            # Fallback if still not found
                             if not pmid or str(pmid).lower() == 'unknown': pmid = 'NO_PMID' # Use a clear placeholder
+                            st.info(f"Debug (Save): Final PMID for DB: {pmid}") # DEBUG
 
-                            # Accession: Prioritize from edited data, then generate a unique one
+                             # Accession: Prioritize from edited data, then generate a unique one
                             accession = edited_data.get('accession') or edited_data.get('Accession')
                             if not accession or str(accession).lower() == 'unknown':
                                 # Generate a more descriptive unique ID if possible
@@ -650,12 +775,13 @@ def show():
     st.markdown("---")
     st.caption("Provider Page - Alpha Version")
 
-# Optional: Add a button to clear the temporary directory if needed
-# if st.session_state.temp_dir and os.path.exists(st.session_state.temp_dir):
-#     if st.button("Clean Temp Files"):
-#         try:
-#             shutil.rmtree(st.session_state.temp_dir)
-#             st.session_state.temp_dir = None
-#             st.success("Temporary files cleaned.")
-#         except Exception as e:
-#             st.error(f"Failed to clean temporary files: {e}")
+    # Optional: Add a button to clear the temporary directory if needed 
+    if 'temp_dir' in st.session_state and st.session_state.temp_dir and os.path.exists(st.session_state.temp_dir):
+         if st.button("Clean Temp Files"):
+             try:
+                 shutil.rmtree(st.session_state.temp_dir)
+                 st.session_state.temp_dir = None # Reset state variable
+                 st.success("Temporary files cleaned.")
+                 st.rerun() # Rerun to reflect the change
+             except Exception as e:
+                 st.error(f"Failed to clean temporary files: {e}")

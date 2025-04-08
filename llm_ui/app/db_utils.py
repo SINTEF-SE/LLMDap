@@ -282,12 +282,13 @@ def _extract_metadata_for_db(file_path):
     if not metadata.get('organism'): metadata['organism'] = "Unknown"
     if not metadata.get('study_type'): metadata['study_type'] = "Unknown"
 
-    # Convert all values to string for consistency
+    # Convert all values to string for consistency, default missing crucial text fields to None
     for key in metadata:
         if metadata[key] is not None:
             metadata[key] = str(metadata[key])
-        elif key in ['organism', 'study_type', 'title', 'description', 'accession', 'pmid', 'source']:
-             metadata[key] = "Unknown"
+        elif key in ['organism', 'study_type', 'title', 'accession', 'pmid', 'source']:
+             metadata[key] = "Unknown" # Keep Unknown for these required fields
+        # else: description and other non-essential fields remain None if not found
 
     return metadata
 
@@ -295,10 +296,10 @@ def _extract_metadata_from_bulk_entry(entry_data, pmid, file_basename):
     """Helper to extract metadata from a single entry within a bulk JSON file."""
     metadata = {
         'pmid': pmid,
-        'title': f"PMID: {pmid} from {file_basename}",
+        'title': f"PMID: {pmid} from {file_basename}", # Default title, might be updated by PubMed fetch
         'accession': f'BULK-{pmid}',
         'organism': "Unknown", 'study_type': "Unknown",
-        'description': f"Entry for PMID {pmid} from bulk file: {file_basename}",
+        'description': None, # Default description to None
         'source': 'bulk_processed',
         'file_path': f"{file_basename}#PMID{pmid}", # Pseudo-path
     }
@@ -336,11 +337,12 @@ def _extract_metadata_from_bulk_entry(entry_data, pmid, file_basename):
     if not metadata.get('organism'): metadata['organism'] = "Unknown"
     if not metadata.get('study_type'): metadata['study_type'] = "Unknown"
 
-    # Convert all values to string
+    # Convert all values to string, default missing crucial text fields to None
     for key in metadata:
         if metadata[key] is not None: metadata[key] = str(metadata[key])
-        elif key in ['organism', 'study_type', 'title', 'description', 'accession', 'pmid', 'source']:
-             metadata[key] = "Unknown"
+        elif key in ['organism', 'study_type', 'title', 'accession', 'pmid', 'source']:
+             metadata[key] = "Unknown" # Keep Unknown for these required fields
+        # else: description and other non-essential fields remain None if not found
     return metadata
 
 # --- PubMed Title Fetching ---
@@ -520,14 +522,23 @@ def get_dataset_count(search_term=None):
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        sql = "SELECT COUNT(*) FROM datasets"
+        # Base query filters out placeholder titles
+        sql = """
+            SELECT COUNT(*) FROM datasets
+            WHERE title IS NOT NULL
+              AND title != 'Unknown'
+              AND NOT title LIKE 'Dataset %'
+              AND NOT title LIKE 'PMID:%'
+              AND NOT title LIKE 'User Dataset %'
+        """
         params = []
         if search_term:
             search_pattern = f"%{search_term}%"
+            # Add search conditions ANDed with the base filter
             sql += """
-                WHERE (accession LIKE ? OR pmid LIKE ? OR title LIKE ? OR
-                      organism LIKE ? OR study_type LIKE ? OR description LIKE ? OR
-                      organism_part LIKE ? OR technology LIKE ? OR experimental_factors LIKE ?)
+                AND (accession LIKE ? OR pmid LIKE ? OR title LIKE ? OR
+                     organism LIKE ? OR study_type LIKE ? OR description LIKE ? OR
+                     organism_part LIKE ? OR technology LIKE ? OR experimental_factors LIKE ?)
             """
             params = [search_pattern] * 9
 
@@ -554,15 +565,24 @@ def get_datasets_page(page_number, page_size, search_term=None):
             'release_date', 'experimental_factors', 'hardware', 'experimental_designs',
             'assay_by_molecule'
         ]
-        sql = f"SELECT {', '.join(select_cols)} FROM datasets"
+        # Base query filters out placeholder titles
+        sql = f"""
+            SELECT {', '.join(select_cols)} FROM datasets
+            WHERE title IS NOT NULL
+              AND title != 'Unknown'
+              AND NOT title LIKE 'Dataset %'
+              AND NOT title LIKE 'PMID:%'
+              AND NOT title LIKE 'User Dataset %'
+        """
         params = []
 
         if search_term:
             search_pattern = f"%{search_term}%"
+            # Add search conditions ANDed with the base filter
             sql += """
-                WHERE (accession LIKE ? OR pmid LIKE ? OR title LIKE ? OR
-                      organism LIKE ? OR study_type LIKE ? OR description LIKE ? OR
-                      organism_part LIKE ? OR technology LIKE ? OR experimental_factors LIKE ?)
+                AND (accession LIKE ? OR pmid LIKE ? OR title LIKE ? OR
+                     organism LIKE ? OR study_type LIKE ? OR description LIKE ? OR
+                     organism_part LIKE ? OR technology LIKE ? OR experimental_factors LIKE ?)
             """
             params = [search_pattern] * 9
 
