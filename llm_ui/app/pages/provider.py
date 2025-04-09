@@ -90,8 +90,16 @@ def _try_extract_pmid(file_path: str) -> Optional[str]:
                 print(f"[_try_extract_pmid] Found PMID {pmid} via XML tag <PMID>.")
                 return pmid # Found via specific XML tag, return immediately
 
+            # Look for <infon key="article-id_pmid">...</infon>
+            # More robust search using XPath, ignoring namespaces
+            pmid_elem = root.find(".//{*}infon[@key='article-id_pmid']")
+            if pmid_elem is not None and pmid_elem.text and pmid_elem.text.strip().isdigit():
+                pmid = pmid_elem.text.strip()
+                print(f"[_try_extract_pmid] Found PMID {pmid} via XML tag <infon key='article-id_pmid'>.")
+                return pmid # Found via specific XML tag, return immediately
+
             # If specific tags not found, prepare to read content for regex
-            print(f"[_try_extract_pmid] XML parsed but no specific PMID tag found in {os.path.basename(file_path)}. Will check content via regex.")
+            print(f"[_try_extract_pmid] XML parsed but no specific PMID tag found (incl. infon) in {os.path.basename(file_path)}. Will check content via regex.")
 
         except ET.ParseError:
             print(f"[_try_extract_pmid] File {os.path.basename(file_path)} is not valid XML. Will check content via regex.")
@@ -327,6 +335,83 @@ def create_pydantic_model_from_schema(schema_content: str, model_name: str = "Cu
         import traceback
         st.error(traceback.format_exc())
         return None
+
+def fetch_pubmed_metadata(pmid: str) -> Optional[Dict[str, Any]]:
+    """Fetches metadata (title, pub types, MeSH) from PubMed using E-utilities efetch."""
+    if not pmid or not pmid.isdigit():
+        return None
+
+    base_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
+    params = {
+        "db": "pubmed",
+        "id": pmid,
+        "retmode": "xml", # Fetch XML for detailed parsing
+        "tool": "streamlit_app", # Identify the tool
+        "email": "user@example.com" # Replace with a real email if possible
+    }
+    try:
+        response = requests.get(base_url, params=params, timeout=20) # Increased timeout
+        response.raise_for_status()
+        xml_content = response.text
+
+        # Parse the XML content
+        root = ET.fromstring(xml_content)
+        article = root.find(".//PubmedArticle/MedlineCitation/Article")
+        mesh_list_elements = root.findall(".//PubmedArticle/MedlineCitation/MeshHeadingList/MeshHeading")
+        pub_type_elements = root.findall(".//PubmedArticle/MedlineCitation/Article/PublicationTypeList/PublicationType")
+
+        if article is None:
+            st.warning(f"Could not find Article details in PubMed XML for PMID {pmid}.")
+            return None
+
+        # Extract Title
+        title_element = article.find("./ArticleTitle")
+        title = title_element.text if title_element is not None and title_element.text else None
+
+        # Extract Publication Types (General)
+        pub_types = [pt.text for pt in pub_type_elements if pt.text]
+        pubtype_general = ", ".join(pub_types) if pub_types else None
+
+        # Extract MeSH Terms
+        mesh_terms = []
+        for heading in mesh_list_elements:
+            desc = heading.find("./DescriptorName")
+            desc_text = desc.text.strip() if desc is not None and desc.text else None
+            if desc_text:
+                qualifiers = heading.findall("./QualifierName")
+                qual_texts = [q.text.strip() for q in qualifiers if q.text]
+                if qual_texts:
+                    # Combine descriptor with qualifiers
+                    mesh_terms.extend([f"{desc_text}/{q_text}" for q_text in qual_texts])
+                else:
+                    mesh_terms.append(desc_text)
+
+        metadata = {
+            "title": title,
+            "pubtype_general": pubtype_general,
+            "mesh_list": mesh_terms if mesh_terms else None # Store list or None
+        }
+
+        # Return None only if all fields are None
+        if all(v is None for v in metadata.values()):
+            st.warning(f"No useful metadata extracted from PubMed XML for PMID {pmid}.")
+            return None
+
+        st.info(f"Fetched PubMed metadata for {pmid}: Title='{metadata.get('title', 'N/A')}', PubTypes='{metadata.get('pubtype_general', 'N/A')}', MeSH found={bool(metadata.get('mesh_list'))}")
+        return metadata
+
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error fetching PubMed XML for PMID {pmid}: {e}")
+        return None
+    except ET.ParseError as e:
+        st.error(f"Error parsing PubMed XML for PMID {pmid}: {e}")
+        return None
+    except Exception as e:
+        st.error(f"Unexpected error fetching/parsing PubMed metadata for PMID {pmid}: {e}")
+        import traceback
+        st.error(traceback.format_exc()) # More detailed error
+        return None
+
 
 # --- Streamlit App ---
 
@@ -699,8 +784,14 @@ def show():
                             st.info(f"Debug (Save): PMID from edited_data: {pmid_from_edited}") # DEBUG
                             pmid = pmid_candidate or pmid_from_edited # Check candidate first
                             # Fallback if still not found
-                            if not pmid or str(pmid).lower() == 'unknown': pmid = 'NO_PMID' # Use a clear placeholder
+                            if not pmid or str(pmid).lower() == 'unknown': pmid = 'NO_PMID' # a clear placeholder
                             st.info(f"Debug (Save): Final PMID for DB: {pmid}") # DEBUG
+
+                            # --- Fetch Metadata from PubMed if PMID is valid ---
+                            pubmed_metadata = None
+                            if pmid != 'NO_PMID':
+                                pubmed_metadata = fetch_pubmed_metadata(pmid)
+                            # ----------------------------------------------------
 
                              # Accession: Prioritize from edited data, then generate a unique one
                             accession = edited_data.get('accession') or edited_data.get('Accession')
@@ -712,6 +803,7 @@ def show():
 
                             # Title: Prioritize custom input, then edited data, then source filename
                             title = custom_dataset_name.strip() or \
+                                    (pubmed_metadata.get('title') if pubmed_metadata else None) or \
                                     edited_data.get('title') or \
                                     edited_data.get('Title') or \
                                     source_info.get('name', f"Dataset {accession}") # Fallback
@@ -722,8 +814,8 @@ def show():
                                 'accession': accession,
                                 'pmid': pmid,
                                 'description': edited_data.get('description', 'User-provided dataset via Provider page.'),
-                                'organism': edited_data.get('organism'),
-                                'study_type': edited_data.get('study_type'),
+                                'organism': edited_data.get('organism'), # Keep existing logic for organism for now
+                                #'study_type': pubmed_metadata.get('study_type') if pubmed_metadata else edited_data.get('study_type'), # Prioritize fetched study type
                                 'source': 'user_provider', # Mark as user-provided
                                 'original_file': source_info.get('value', source_info.get('name', 'Unknown')),
                                 # Add other fields if they exist in edited_data
@@ -733,6 +825,19 @@ def show():
                                 'assay_by_molecule': edited_data.get('assay_by_molecule'),
                                 # Add any other relevant fields your db_utils expects
                             }
+
+                            # --- Determine Study Type with Prioritization ---
+                            study_type_final = edited_data.get('study_type') # Priority 1: Edited data
+                            if not study_type_final and pubmed_metadata and pubmed_metadata.get('mesh_list'):
+                                # Priority 2: MeSH terms (joined)
+                                study_type_final = "; ".join(pubmed_metadata['mesh_list'])
+                            if not study_type_final and pubmed_metadata and pubmed_metadata.get('pubtype_general'):
+                                # Priority 3: General Pub Type
+                                study_type_final = pubmed_metadata['pubtype_general']
+                            # Priority 4: Fallback to None or empty string if nothing found
+                            db_data['study_type'] = study_type_final if study_type_final else None
+                            st.info(f"Debug (Save): Final Study Type for DB: {db_data['study_type']}") # DEBUG
+                            # -------------------------------------------------
 
                             # --- Save JSON and Update DB ---
                             user_datasets_dir = os.path.join(project_root, 'llm_ui', 'app', 'user_datasets')
