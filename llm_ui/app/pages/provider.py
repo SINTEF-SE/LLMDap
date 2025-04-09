@@ -372,8 +372,12 @@ def fetch_pubmed_metadata(pmid: str) -> Optional[Dict[str, Any]]:
         pub_types = [pt.text for pt in pub_type_elements if pt.text]
         pubtype_general = ", ".join(pub_types) if pub_types else None
 
-        # Extract MeSH Terms
+        # Extract MeSH Terms and potential Organisms
         mesh_terms = []
+        mesh_organisms = []
+        # Define common organism MeSH terms (add more as needed, case-insensitive)
+        common_organism_terms = {"humans", "mice", "rats", "animals"}
+
         for heading in mesh_list_elements:
             desc = heading.find("./DescriptorName")
             desc_text = desc.text.strip() if desc is not None and desc.text else None
@@ -385,11 +389,16 @@ def fetch_pubmed_metadata(pmid: str) -> Optional[Dict[str, Any]]:
                     mesh_terms.extend([f"{desc_text}/{q_text}" for q_text in qual_texts])
                 else:
                     mesh_terms.append(desc_text)
+                # Check if this descriptor is a potential organism
+                if desc_text and desc_text.lower() in common_organism_terms:
+                    if desc_text not in mesh_organisms: # Avoid duplicates
+                         mesh_organisms.append(desc_text)
 
         metadata = {
             "title": title,
             "pubtype_general": pubtype_general,
-            "mesh_list": mesh_terms if mesh_terms else None # Store list or None
+            "mesh_list": mesh_terms if mesh_terms else None, # Store list or None
+            "mesh_organisms": mesh_organisms if mesh_organisms else None # Store list or None
         }
 
         # Return None only if all fields are None
@@ -826,18 +835,57 @@ def show():
                                 # Add any other relevant fields your db_utils expects
                             }
 
-                            # --- Determine Study Type with Prioritization ---
+                            # --- Determine Study Type with Prioritization (Simplified) ---
                             study_type_final = edited_data.get('study_type') # Priority 1: Edited data
-                            if not study_type_final and pubmed_metadata and pubmed_metadata.get('mesh_list'):
-                                # Priority 2: MeSH terms (joined)
-                                study_type_final = "; ".join(pubmed_metadata['mesh_list'])
                             if not study_type_final and pubmed_metadata and pubmed_metadata.get('pubtype_general'):
-                                # Priority 3: General Pub Type
+                                # Priority 2: General Pub Type (Fallback)
                                 study_type_final = pubmed_metadata['pubtype_general']
-                            # Priority 4: Fallback to None or empty string if nothing found
+                            # Priority 3: Fallback to None or empty string if nothing found
                             db_data['study_type'] = study_type_final if study_type_final else None
                             st.info(f"Debug (Save): Final Study Type for DB: {db_data['study_type']}") # DEBUG
                             # -------------------------------------------------
+
+                            # --- Determine Organism with Prioritization ---
+                            # List from data/interesting_fields.txt (case-insensitive)
+                            VALID_ORGANISMS_LOWER = {
+                                'montastraea faveolata', 'mus musculus', 'saccharomyces cerevisiae',
+                                'rattus norvegicus', 'homo sapiens', 'pichia pastoris',
+                                'staphylococcus epidermidis', 'macaca mulatta', 'staphylococcus aureus',
+                                'danio rerio', 'schizosaccharomyces pombe'
+                            }
+                            organism_final = edited_data.get('organism') # Priority 1: Edited data
+                            if not organism_final and pubmed_metadata and pubmed_metadata.get('mesh_organisms'):
+                                # Priority 2: Check fetched MeSH organisms against valid list
+                                for mesh_org in pubmed_metadata['mesh_organisms']:
+                                     # Simple mapping for common terms
+                                     org_to_check = mesh_org.lower()
+                                     if org_to_check == 'humans': org_to_check = 'homo sapiens'
+                                     elif org_to_check == 'mice': org_to_check = 'mus musculus'
+                                     elif org_to_check == 'rats': org_to_check = 'rattus norvegicus'
+                                     # Add other mappings if needed
+
+                                     if org_to_check in VALID_ORGANISMS_LOWER:
+                                          # Find the original casing from the valid list
+                                          for valid_org in VALID_ORGANISMS_LOWER:
+                                               if valid_org == org_to_check:
+                                                    # Find the correctly cased version (a bit inefficient but works)
+                                                    original_casing_list = [
+                                                        'Montastraea faveolata', 'Mus musculus', 'Saccharomyces cerevisiae',
+                                                        'Rattus norvegicus', 'Homo sapiens', 'Pichia pastoris',
+                                                        'Staphylococcus epidermidis', 'Macaca mulatta', 'Staphylococcus aureus',
+                                                        'Danio rerio', 'Schizosaccharomyces pombe'
+                                                    ]
+                                                    for org_cased in original_casing_list:
+                                                         if org_cased.lower() == valid_org:
+                                                              organism_final = org_cased
+                                                              break
+                                                    break # Found a match, stop checking mesh_orgs
+                                     if organism_final: break # Exit outer loop once a match is found
+                            # Priority 3: Fallback to None
+                            db_data['organism'] = organism_final if organism_final else None
+                            st.info(f"Debug (Save): Final Organism for DB: {db_data['organism']}") # DEBUG
+                            # -------------------------------------------------
+
 
                             # --- Save JSON and Update DB ---
                             user_datasets_dir = os.path.join(project_root, 'llm_ui', 'app', 'user_datasets')
