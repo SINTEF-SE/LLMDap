@@ -21,7 +21,7 @@ data_dir = os.path.join(project_root, 'data')
 sys.path.append(data_dir)
 
 # --- Attempt Imports with Error Handling ---
-# Removed arxpr2_schema and partition imports from here
+# This function will import dependencies and handle errors
 def import_dependencies():
     dependencies = {
         "call_inference": None, "save_xml": None, "init_db": None,
@@ -50,14 +50,10 @@ def import_dependencies():
         import_errors.append("unstructured (required for PDF processing)")
         dependencies["partition"] = None # Explicitly set to None if import fails
 
-    # Removed arxpr2_schema import attempt from here
-
     return dependencies, import_errors
 
 # --- Helper Functions ---
 
-# Error display moved after st.title
-# Dependency loading moved after st.title
 
 def _try_extract_pmid(file_path: str) -> Optional[str]:
     """Attempts to extract a PMID from XML/HTML or text content."""
@@ -122,6 +118,7 @@ def _try_extract_pmid(file_path: str) -> Optional[str]:
             return None
 
     # 3. Try regex on content (if read successfully)
+    regex_found_pmid = False
     if file_processed_for_content and content:
         # Regex for PMID: optional space/colon/hyphen, 7-9 digits, word boundaries, case-insensitive
         # Added flexibility for variations like "PubMed ID:"
@@ -129,10 +126,53 @@ def _try_extract_pmid(file_path: str) -> Optional[str]:
         if match and match.group(1):
             pmid = match.group(1)
             print(f"[_try_extract_pmid] Found PMID {pmid} via regex.")
+            regex_found_pmid = True
             return pmid # Found via regex
 
-    # 4. If no PMID found after all checks
-    print(f"[_try_extract_pmid] No PMID found in {os.path.basename(file_path)} after XML and regex checks.")
+    # 4. Fallback: Try parsing content as XML/HTML if regex failed and it wasn't an XML file initially
+    if file_processed_for_content and content and not regex_found_pmid and not file_path.lower().endswith(".xml"):
+        print(f"[_try_extract_pmid] Regex failed for non-XML file {os.path.basename(file_path)}. Attempting content parsing...")
+        try:
+            # Attempt to parse the string content directly
+            # Ensure content is treated as a string, not bytes
+            if isinstance(content, bytes):
+                 content_str = content.decode('utf-8', errors='ignore')
+            else:
+                 content_str = str(content) # Ensure it's a string
+
+            # Basic check for XML/HTML structure before attempting full parse
+            if '<' in content_str and '>' in content_str:
+                 root = ET.fromstring(content_str) # Parse from string
+
+                 # Reuse XML search logic
+                 pmid_elem = root.find(".//{*}article-id[@pub-id-type='pmid']")
+                 if pmid_elem is not None and pmid_elem.text and pmid_elem.text.strip().isdigit():
+                     pmid = pmid_elem.text.strip()
+                     print(f"[_try_extract_pmid] Found PMID {pmid} via content parsing <article-id>.")
+                     return pmid
+
+                 pmid_elem = root.find(".//{*}PMID")
+                 if pmid_elem is not None and pmid_elem.text and pmid_elem.text.strip().isdigit():
+                     pmid = pmid_elem.text.strip()
+                     print(f"[_try_extract_pmid] Found PMID {pmid} via content parsing <PMID>.")
+                     return pmid
+
+                 pmid_elem = root.find(".//{*}infon[@key='article-id_pmid']")
+                 if pmid_elem is not None and pmid_elem.text and pmid_elem.text.strip().isdigit():
+                     pmid = pmid_elem.text.strip()
+                     print(f"[_try_extract_pmid] Found PMID {pmid} via content parsing <infon key='article-id_pmid'>.")
+                     return pmid
+                 print(f"[_try_extract_pmid] Content parsing attempted but no specific PMID tag found.")
+            else:
+                 print(f"[_try_extract_pmid] Content does not appear to contain XML/HTML tags. Skipping content parsing.")
+
+        except ET.ParseError:
+            print(f"[_try_extract_pmid] Content parsing failed (not valid XML/HTML fragment).")
+        except Exception as content_parse_err:
+            print(f"[_try_extract_pmid] Error during content parsing: {content_parse_err}")
+
+    # 5. If no PMID found after all checks
+    print(f"[_try_extract_pmid] No PMID found in {os.path.basename(file_path)} after all checks.")
     return None
 
 def is_pubmed_id(input_string):
@@ -421,6 +461,49 @@ def fetch_pubmed_metadata(pmid: str) -> Optional[Dict[str, Any]]:
         st.error(traceback.format_exc()) # More detailed error
         return None
 
+def get_pmid_from_doi(doi: str) -> Optional[str]:
+    """Attempts to find a PMID for a given DOI using NCBI ESearch."""
+    # Clean up DOI string if needed (e.g., remove "doi:")
+    doi = re.sub(r'^doi:\s*', '', doi, flags=re.IGNORECASE).strip()
+    if not doi.startswith("10."): # Basic DOI format check
+        st.error(f"'{doi}' does not look like a valid DOI.")
+        return None
+
+    base_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
+    params = {
+        "db": "pubmed",
+        "term": f"{doi}[DOI]", # Search for the DOI in the DOI field
+        "retmode": "json",
+        "retmax": 1, # We only expect one PMID per DOI
+        "tool": "streamlit_app",
+        "email": "user@example.com" # Replace if possible
+    }
+    try:
+        st.info(f"Searching PubMed for DOI: {doi}...")
+        response = requests.get(base_url, params=params, timeout=15)
+        response.raise_for_status()
+        data = response.json()
+
+        esearchresult = data.get("esearchresult", {})
+        idlist = esearchresult.get("idlist", [])
+
+        if idlist and len(idlist) > 0:
+            pmid = idlist[0]
+            st.success(f"Found PMID {pmid} for DOI {doi}.")
+            return pmid
+        else:
+            st.warning(f"No PMID found for DOI {doi} in PubMed.")
+            return None
+
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error searching PubMed for DOI {doi}: {e}")
+        return None
+    except json.JSONDecodeError:
+        st.error(f"Error decoding PubMed search response for DOI {doi}.")
+        return None
+    except Exception as e:
+        st.error(f"Unexpected error searching for DOI {doi}: {e}")
+        return None
 
 # --- Streamlit App ---
 
@@ -503,12 +586,48 @@ def show():
                       # Clear results on new input
                       st.session_state.processed_data = None; st.session_state.edited_json = None; st.session_state.error_message = None
 
-                      # --- Store PMID if input is directly an ID ---
-                      if is_pubmed_id(input_url_or_id_value):
-                           st.session_state.source_info['pmid_candidate'] = input_url_or_id_value
-                           print(f"[Provider] Input is PMID: {input_url_or_id_value}.")
-                      # We will attempt content extraction later, after fetching the URL
-                 input_url_or_id = input_url_or_id_value
+                      # --- Determine input type: PMID, DOI, or URL ---
+                      input_value = input_url_or_id_value.strip()
+                      if is_pubmed_id(input_value):
+                           st.session_state.source_info['pmid_candidate'] = input_value
+                           st.session_state.source_info['input_type'] = 'pmid'
+                           print(f"[Provider] Input is PMID: {input_value}.")
+                      elif input_value.lower().startswith("10.") or input_value.lower().startswith("doi:"):
+                           st.session_state.source_info['input_type'] = 'doi'
+                           # Attempt conversion immediately to provide feedback
+                           converted_pmid = get_pmid_from_doi(input_value)
+                           if converted_pmid:
+                               st.session_state.source_info['pmid_candidate'] = converted_pmid
+                               print(f"[Provider] Input is DOI: {input_value}, converted to PMID: {converted_pmid}.")
+                           else:
+                               # Keep DOI value but clear candidate, error shown by get_pmid_from_doi
+                               st.session_state.source_info['pmid_candidate'] = None
+                               print(f"[Provider] Input is DOI: {input_value}, but failed to convert to PMID.")
+                      elif input_value.lower().startswith("http"):
+                           st.session_state.source_info['input_type'] = 'url'
+                           print(f"[Provider] Input is URL: {input_value}.")
+                           # --- Attempt to extract DOI from URL and convert to PMID ---
+                           doi_match = re.search(r'(10\.\d{4,9}/[-._;()/:A-Z0-9]+)', input_value, re.IGNORECASE)
+                           if doi_match:
+                                extracted_doi = doi_match.group(1)
+                                print(f"[Provider] Extracted DOI {extracted_doi} from URL.")
+                                st.info(f"Attempting to convert extracted DOI: {extracted_doi}") # ADDED LOGGING
+                                converted_pmid_from_url_doi = get_pmid_from_doi(extracted_doi)
+                                st.info(f"DOI to PMID conversion result: {converted_pmid_from_url_doi}") # ADDED LOGGING
+                                if converted_pmid_from_url_doi:
+                                     st.session_state.source_info['pmid_candidate'] = converted_pmid_from_url_doi
+                                     print(f"[Provider] Stored PMID {converted_pmid_from_url_doi} from URL's DOI.")
+                                else:
+                                     print(f"[Provider] Failed to convert extracted DOI {extracted_doi} from URL.")
+                           else:
+                                print("[Provider] No DOI found in URL.")
+                           # --- End DOI extraction from URL ---
+                      else:
+                           st.session_state.source_info['input_type'] = 'unknown'
+                           st.error("Input not recognized as PMID, DOI, or URL.")
+                           print(f"[Provider] Input not recognized: {input_value}.")
+
+                 input_url_or_id = input_url_or_id_value # Keep original input for display/processing
 
     # --- Schema Selection ---
     with st.container(border=True):
@@ -642,32 +761,129 @@ def show():
                             extracted_text_content = None
 
                     elif input_url_or_id and current_source_info.get("type") == "url_or_id":
-                        value = current_source_info.get("value", "")
-                        if is_pubmed_id(value):
-                            # PMID was already stored in source_info['pmid_candidate']
-                            temp_input_path = fetch_xml_from_pubmed(value, temp_dir, save_xml) # Pass save_xml func
-                        elif value.lower().startswith("http"):
-                            temp_input_path = fetch_xml_from_url(value, temp_dir)
-                            # --- Try extracting PMID from fetched URL content ---
-                            if temp_input_path and os.path.exists(temp_input_path):
-                                 pmid_from_content = _try_extract_pmid(temp_input_path)
-                                 if pmid_from_content:
-                                      st.session_state.source_info['pmid_candidate'] = pmid_from_content
-                                      print(f"[Provider] Found potential PMID {pmid_from_content} from URL content.")
-                                      st.info(f"Debug: PMID from URL content: {pmid_from_content}") # DEBUG
-                             # ----------------------------------------------------
-                        else:
-                            st.error("Invalid input. Please provide a valid XML URL or PubMed ID.")
-                            st.session_state.error_message = "Invalid URL or PubMed ID."
+                        value = current_source_info.get("value", "") # The original user input
+                        input_type = current_source_info.get("input_type", "unknown")
+                        pmid_candidate = current_source_info.get("pmid_candidate") # Might be from direct input or DOI conversion
 
-                        if temp_input_path and os.path.exists(temp_input_path):
-                            input_path_for_pipeline = temp_input_path
-                            extracted_text_content = None
-                            # Optional: Could still run extract_text_from_file here if needed for non-XML/HTML URL content
-                            # extracted_text_path = extract_text_from_file(temp_input_path, temp_dir, partition_func)
-                            # if extracted_text_path: ... read content ... ; input_path_for_pipeline = None; _try_extract_pmid(extracted_text_path) ...
-                        elif not st.session_state.error_message: # If fetch didn't already set an error
-                            st.session_state.error_message = "Failed to fetch or save input from URL/ID."
+                        if input_type == 'pmid' and pmid_candidate:
+                            temp_input_path = fetch_xml_from_pubmed(pmid_candidate, temp_dir, save_xml)
+                        elif input_type == 'doi':
+                            # Log original DOI value for debugging
+                            st.info(f"Processing DOI: {value}")
+                            
+                            if pmid_candidate: # If DOI was successfully converted earlier
+                                st.info(f"Using previously converted PMID: {pmid_candidate} for DOI: {value}")
+                                temp_input_path = fetch_xml_from_pubmed(pmid_candidate, temp_dir, save_xml)
+                                
+                                # Check if XML was actually fetched
+                                if temp_input_path and os.path.exists(temp_input_path):
+                                    st.success(f"Successfully fetched XML file: {os.path.basename(temp_input_path)}")
+                                    # Examine the XML content
+                                    try:
+                                        with open(temp_input_path, "r", encoding="utf-8", errors="ignore") as f:
+                                            xml_content = f.read(1000)  # Read first 1000 chars
+                                            st.info(f"XML content preview (first 200 chars): {xml_content[:200].replace(chr(10), ' ')}")
+                                            if len(xml_content) < 50:
+                                                st.warning(f"WARNING: XML content is very short ({len(xml_content)} chars)")
+                                    except Exception as xml_read_error:
+                                        st.error(f"Error reading XML content: {xml_read_error}")
+                                else:
+                                    st.error(f"Failed to fetch or save XML for PMID: {pmid_candidate}")
+                            else:
+                                # Attempt conversion again if it failed initially or state was lost
+                                st.info(f"Re-attempting DOI to PMID conversion for DOI: {value}...")
+                                pmid_candidate = get_pmid_from_doi(value)
+                                if pmid_candidate:
+                                    st.session_state.source_info['pmid_candidate'] = pmid_candidate # Update state
+                                    st.success(f"Successfully converted DOI to PMID: {pmid_candidate}")
+                                    
+                                    # Inspect XML content before processing
+                                    st.info(f"Fetching XML from PubMed using PMID: {pmid_candidate}")
+                                    temp_input_path = fetch_xml_from_pubmed(pmid_candidate, temp_dir, save_xml)
+                                    
+                                    # Check if XML was actually fetched
+                                    if temp_input_path and os.path.exists(temp_input_path):
+                                        st.success(f"Successfully fetched XML file: {os.path.basename(temp_input_path)}")
+                                        try:
+                                            file_size = os.path.getsize(temp_input_path)
+                                            st.info(f"XML file size: {file_size} bytes")
+                                            
+                                            if file_size < 1000:
+                                                st.warning(f"XML file is very small ({file_size} bytes), checking if it contains an error message")
+                                                # Verify file contents
+                                                with open(temp_input_path, "r", encoding="utf-8", errors="ignore") as f:
+                                                    xml_content = f.read()
+                                                    if '[Error]' in xml_content or 'No result can be found' in xml_content:
+                                                        st.error(f"XML file contains an error message: {xml_content[:200]}")
+                                                        st.info("This paper might not be available in PubMed Central's open access collection.")
+                                                        st.info("Attempting to use direct text entry instead...")
+                                                        
+                                                        # Create a fallback path by using the DOI to query a citation API
+                                                        try:
+                                                            doi_citation_url = f"https://api.crossref.org/works/{value}/transform/text/x-bibliography"
+                                                            citation_response = requests.get(doi_citation_url, timeout=10)
+                                                            if citation_response.status_code == 200:
+                                                                citation_text = citation_response.text
+                                                                st.info(f"Found citation: {citation_text}")
+                                                                
+                                                                # Create a text file with the citation and DOI
+                                                                citation_file_path = os.path.join(temp_dir, f"{pmid_candidate}_citation.txt")
+                                                                with open(citation_file_path, "w", encoding="utf-8") as cf:
+                                                                    cf.write(f"Citation: {citation_text}\n\nDOI: {value}\nPMID: {pmid_candidate}\n\n")
+                                                                    cf.write("NOTE: This paper could not be automatically retrieved. This is a placeholder with the citation information only.")
+                                                                
+                                                                # Use this text file as the input instead
+                                                                extracted_text_content = f"Citation: {citation_text}\n\nDOI: {value}\nPMID: {pmid_candidate}\n\nNOTE: This paper could not be automatically retrieved. This is a placeholder with the citation information only."
+                                                                input_path_for_pipeline = None
+                                                                st.success("Created citation placeholder for processing")
+                                                        except Exception as citation_error:
+                                                            st.error(f"Error fetching citation: {citation_error}")
+                                        except Exception as file_check_error:
+                                            st.error(f"Error checking XML file: {file_check_error}")
+                                    else:
+                                        st.error(f"Failed to fetch or save XML for PMID: {pmid_candidate}")
+                                        st.info("This paper might not be available in PubMed Central's open access collection.")
+                                else:
+                                    st.error(f"Could not find a PMID for DOI: {value}")
+                                    st.session_state.error_message = f"Could not find a PMID for DOI: {value}"
+                        elif input_type == 'url':
+                            temp_input_path = fetch_xml_from_url(value, temp_dir)
+                            if temp_input_path and os.path.exists(temp_input_path):
+                                # --- Try extracting PMID from fetched URL content ---
+                                if not pmid_candidate: # Only extract if we don't already have one from DOI conversion etc.
+                                     pmid_from_content = _try_extract_pmid(temp_input_path)
+                                     if pmid_from_content:
+                                          st.session_state.source_info['pmid_candidate'] = pmid_from_content
+                                          print(f"[Provider] Found potential PMID {pmid_from_content} from URL content.")
+                                          st.info(f"Debug: PMID from URL content: {pmid_from_content}") # DEBUG
+                                 # ----------------------------------------------------
+
+                                # --- Always attempt text extraction for URL downloads ---
+                                st.info("Attempting to extract text content from downloaded URL file...")
+                                extracted_text_path = extract_text_from_file(temp_input_path, temp_dir, partition_func)
+                                if extracted_text_path and os.path.exists(extracted_text_path):
+                                     with open(extracted_text_path, "r", encoding="utf-8") as f:
+                                          extracted_text_content = f.read()
+                                     input_path_for_pipeline = None # Use text content, not path
+                                     st.info("Using extracted text content for pipeline.")
+                                     # Optionally re-run PMID extraction on the cleaner text ONLY if not already found via URL's DOI
+                                     if not st.session_state.source_info.get('pmid_candidate'):
+                                          st.info("Attempting PMID extraction from extracted URL text...")
+                                          pmid_from_extracted_text = _try_extract_pmid(extracted_text_path)
+                                          if pmid_from_extracted_text:
+                                               st.session_state.source_info['pmid_candidate'] = pmid_from_extracted_text
+                                               st.info(f"Debug: PMID from extracted text: {pmid_from_extracted_html}")
+                                else:
+                                     st.warning("Failed to extract text from downloaded URL file, proceeding with original file path (might cause downstream errors).")
+                                     input_path_for_pipeline = temp_input_path # Fallback to original path
+                                     extracted_text_content = None
+                                # ---------------------------------------------------------
+                            elif not st.session_state.error_message: # If fetch didn't already set an error
+                                st.session_state.error_message = "Failed to fetch or save input from URL."
+                        else: # Handle case where input type was unknown or DOI conversion failed and wasn't handled
+                             if not st.session_state.error_message: # Avoid overwriting specific DOI errors
+                                  st.error("Invalid input type detected or required identifier missing.")
+                                  st.session_state.error_message = "Invalid input or missing identifier."
 
                     else:
                          st.error("No valid input source detected.")
@@ -675,7 +891,9 @@ def show():
 
                     # --- Run Pipeline ---
                      # Check if we have either a valid path OR extracted text content AND no prior error
+                    st.info("Checking conditions before running pipeline...") # ADDED LOGGING
                     if not st.session_state.error_message and ((input_path_for_pipeline and os.path.exists(input_path_for_pipeline)) or extracted_text_content):
+                         st.info(f"Schema to run: {schema_to_run.__name__ if schema_to_run else 'None'}") # ADDED LOGGING
                          if schema_to_run:
                              st.info(f"Debug: PMID candidate before pipeline: {st.session_state.get('source_info', {}).get('pmid_candidate')}") # DEBUG
                              if call_inference:
@@ -710,7 +928,9 @@ def show():
 
                                 # Only run if no internal error
                                 if "error_message" not in st.session_state or st.session_state.error_message is None:
+                                    st.info("Calling inference pipeline...") # ADDED LOGGING
                                     output = call_inference(**inference_args)
+                                    st.info("Inference pipeline finished.") # ADDED LOGGING
 
                                     # [Output handling remains similar]
                                     if output:

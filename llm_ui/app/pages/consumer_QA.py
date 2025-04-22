@@ -626,109 +626,118 @@ def show():
     
     selected_datasets = st.session_state.selected_datasets
     
-    # Show selected datasets in a more compact way
-    st.subheader(f"Selected Datasets ({len(selected_datasets)})")
+    # Initialize chat history if not already in session state
+    if 'chat_history' not in st.session_state:
+        st.session_state.chat_history = []
     
-    # Display selected datasets as a grid with icons
-    cols = st.columns(3)
-    for i, ds in enumerate(selected_datasets):
-        col_idx = i % 3
-        with cols[col_idx]:
-            title = ds['title'] or ds['accession']
-            if len(title) > 40:
-                title = title[:40] + "..."
-            st.markdown(f"📊 **{title}**")
+    # Show selected datasets with badges
+    st.markdown("<div style='display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 15px;'>", unsafe_allow_html=True)
+    for ds in selected_datasets:
+        title = ds['title'] or ds['accession']
+        if len(title) > 40:
+            title = title[:40] + "..."
+        st.markdown(f"<span class='datasets-badge'>📊 {title}</span>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
-    # Add styling to the question area
-    st.markdown("---")
-    st.subheader("Ask a Question")
+    # --- Chat Display Area ---
+    st.markdown("<h3>Chat</h3>", unsafe_allow_html=True)
+    # Create a container for the chat messages
+    chat_display_container = st.container()
+    # Apply the chat-container style to this container specifically
+    # Note: Applying height/overflow directly via st.container might not work reliably,
+    # so we rely on the CSS class defined earlier. We add a key for potential future JS interaction.
+    chat_display_container.markdown("<div class='chat-container' id='chat-container-div'>", unsafe_allow_html=True) # Start the styled div
 
-    # Add a simple hint
-    st.markdown("*Ask anything about the selected datasets - experimental design, organisms, methods, etc.*")
+    with chat_display_container:
+        if not st.session_state.chat_history:
+            st.markdown("<div style='text-align: center; color: #888; padding: 20px;'>Ask a question about the selected datasets to get started</div>", unsafe_allow_html=True)
+        else:
+            for i, (time_stamp, question_text, answer_text) in enumerate(st.session_state.chat_history):
+                # User message
+                st.markdown(f"""
+                <div class='message-container' style='align-items: flex-end;'>
+                    <div class='user-message'>
+                        {question_text}
+                        
+                </div>
+                """, unsafe_allow_html=True)
 
-    # Simple question section
-    st.subheader("Quick Question")
+                # Assistant message
+                st.markdown(f"""
+                <div class='message-container' style='align-items: flex-start;'>
+                    <div class='assistant-message'>
+                        {answer_text}
+                        <div class='message-time'>Assistant</div> 
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True) # Close the chat-container-div
     
-    # Setup clearing mechanism
-    if "clear_requested" not in st.session_state:
-        st.session_state.clear_requested = False
-
-    if st.session_state.clear_requested:
-        st.session_state.clear_requested = False
+    # Input area below the chat
+    st.markdown("<h3>Ask a Question</h3>", unsafe_allow_html=True)
+    st.markdown("<div class='input-area'>", unsafe_allow_html=True)
+    
+    # Combine both simple and complex questions into a single input
+    # Use columns to create a layout with input and buttons
+    col1, col2, col3 = st.columns([5, 1, 1])
+    
+    with col1:
+        question = st.text_area("Enter your question:", 
+                              height=80,
+                              placeholder="Ask anything about the selected datasets - experimental design, organisms, methods, etc.",
+                              key="question_input",
+                              label_visibility="collapsed")
+    
+    with col2:
+        clear_button = st.button("🧹 Clear", key="clear_input")
+    
+    with col3:
+        submit_button = st.button("📤 Send", key="submit_question", use_container_width=True)
+    
+    st.markdown("</div>", unsafe_allow_html=True)
+    
+    # Clear input if requested
+    if clear_button:
         st.session_state.question_input = ""
+        st.experimental_rerun()
     
-    # Create two columns for the question input
-    q_col1, q_col2 = st.columns([4, 1])
+    # Clear entire chat history if requested
+    if st.button("🗑️ Clear History", key="clear_history"):
+        st.session_state.chat_history = []
+        st.experimental_rerun()
     
-    with q_col1:
-        question = st.text_input("Enter your question:", 
-                                placeholder="Example: What organism was studied?",
-                                key="question_input")
-    
-    with q_col2:
-        if st.button("🧹 Clear", key="clear_question"):
-            st.session_state.clear_requested = True
-            st.rerun()
-    
-    # Button for the simple question
-    if question:
-        # Center the button with columns
-        _, btn_col, _ = st.columns([1, 2, 1])
-        with btn_col:
-            simple_submit = st.button("📝 Get Answer", key="get_answer_btn", use_container_width=True)
-    else:
-        simple_submit = False
-    
-    # Advanced question section
-    with st.expander("💬 Need to ask a more detailed question?"):
-        # Setup clearing mechanism
-        if "clear_complex_requested" not in st.session_state:
-            st.session_state.clear_complex_requested = False
-            
-        if st.session_state.clear_complex_requested:
-            st.session_state.clear_complex_requested = False
-            st.session_state.complex_question_input = ""
+    # Check for submission action from previous run
+    if 'submit_question_pressed' in st.session_state and st.session_state.submit_question_pressed and 'current_question' in st.session_state and st.session_state.current_question:
+        # Get the question from session state
+        question = st.session_state.current_question
         
-        complex_question = st.text_area("Enter your detailed question:", 
-                                    height=150,
-                                    placeholder="Enter a more complex question that requires multiple paragraphs of explanation...",
-                                    key="complex_question_input")
+        # Reset the flags
+        st.session_state.submit_question_pressed = False
+        st.session_state.current_question = ""
         
-        # Layout with two columns for buttons
-        adv_col1, adv_col2 = st.columns([1, 1])
-        
-        with adv_col1:
-            if st.button("🧹 Clear", key="clear_complex_question"):
-                st.session_state.clear_complex_requested = True
-                st.experimental_rerun()
-        
-        with adv_col2:
-            complex_submit = st.button("📝 Get Answer", key="get_complex_answer_btn")
-    
-    # Process questions - first check complex, then simple
-    get_answer = False
-    if 'complex_submit' in locals() and complex_submit and complex_question:
-        question = complex_question
-        get_answer = True
-    elif 'simple_submit' in locals() and simple_submit and question:
-        get_answer = True
-    
-    # In the section where you process the user's question:
-    if get_answer:
-        st.markdown("---")
-        with st.spinner("Analyzing datasets and generating answer..."):
+        # Temporarily display a spinner at the end of the chat
+        with st.spinner("Generating answer..."):
             # Format the datasets for the prompt with detailed metadata
             formatted_datasets = []
             
+            # Get progress info
+            progress_text = "Fetching dataset metadata..."
+            progress_bar = st.progress(0, text=progress_text)
+            
             for i, dataset in enumerate(selected_datasets):
-                with st.spinner(f"Fetching detailed metadata for dataset {i+1}/{len(selected_datasets)}..."):
-                    # Get detailed metadata using our enhanced function
-                    dataset_info = extract_dataset_metadata(dataset)
-                    
-                    # Add to formatted datasets with proper numbering and spacing
-                    formatted_datasets.append(f"\n### DATASET {i+1}: {dataset['title'] or dataset['accession']}\n")
-                    formatted_datasets.append(dataset_info)
-                    formatted_datasets.append("\n---\n")
+                progress_value = (i + 1) / len(selected_datasets)
+                progress_bar.progress(progress_value, text=f"{progress_text} ({i+1}/{len(selected_datasets)})")
+                
+                # Get detailed metadata using our enhanced function
+                dataset_info = extract_dataset_metadata(dataset)
+                
+                # Add to formatted datasets with proper numbering and spacing
+                formatted_datasets.append(f"\n### DATASET {i+1}: {dataset['title'] or dataset['accession']}\n")
+                formatted_datasets.append(dataset_info)
+                formatted_datasets.append("\n---\n")
+            
+            # Remove progress bar when done
+            progress_bar.empty()
             
             # Join all dataset information
             formatted_dataset_text = "".join(formatted_datasets)
@@ -770,9 +779,18 @@ When addressing metadata specifically, focus on the experimental design, sample 
                 temperature=settings.get('temperature', 0.2)  # Slightly lower temperature for more factual answers
             )
 
-            # Display the answer
-            st.subheader("Answer:")
-            st.markdown(output)
+            # Store Q&A in chat history
+            current_time = datetime.now().strftime("%Y-%m-%d %H:%M")
+            st.session_state.chat_history.append((current_time, question, output))
+            
+            # Force a rerun to update the UI
+            st.rerun()
+    
+    # Handle the submit button click by setting flags in session state
+    if submit_button and question:
+        st.session_state.submit_question_pressed = True
+        st.session_state.current_question = question
+        st.rerun()
     
     # Debug information
     with st.expander("Debug Information", expanded=False):
@@ -788,9 +806,3 @@ When addressing metadata specifically, focus on the experimental design, sample 
         if st.session_state.datasets:
             st.subheader("Sample Dataset Structure")
             st.json(st.session_state.datasets[0])
-
-
-
-
-
-

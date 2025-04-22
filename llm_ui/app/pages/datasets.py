@@ -135,6 +135,31 @@ def show():
             st.session_state.current_dataset_page = total_pages - 1
             st.rerun()
 
+    # --- NEW: Select/Deselect All Buttons for Current Page ---
+    if datasets_on_page: # Only show if there are datasets on the page
+        select_cols = st.columns(2)
+        with select_cols[0]:
+            if st.button("Select All on This Page", key="select_all_page"):
+                for dataset_dict in st.session_state.datasets:
+                    dataset = dict(dataset_dict) # Ensure it's a dict
+                    dataset_id_for_key = dataset.get('file_path')
+                    dataset_id_for_selection = dataset.get('accession', dataset_id_for_key)
+                    if dataset_id_for_selection: # Ensure we have an ID
+                        st.session_state.globally_selected_items[dataset_id_for_selection] = dataset
+                st.rerun()
+        with select_cols[1]:
+            if st.button("Deselect All on This Page", key="deselect_all_page"):
+                for dataset_dict in st.session_state.datasets:
+                    dataset = dict(dataset_dict) # Ensure it's a dict
+                    dataset_id_for_key = dataset.get('file_path')
+                    dataset_id_for_selection = dataset.get('accession', dataset_id_for_key)
+                    if dataset_id_for_selection in st.session_state.globally_selected_items:
+                        try:
+                            del st.session_state.globally_selected_items[dataset_id_for_selection]
+                        except KeyError:
+                            pass # Item already removed
+                st.rerun()
+
     # --- Display Datasets ---
     with st.expander("Available Datasets", expanded=True):
         if datasets_on_page:

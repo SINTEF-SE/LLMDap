@@ -1,4 +1,5 @@
 import json
+import os
 from langchain_community.document_loaders import UnstructuredXMLLoader
 
 
@@ -220,22 +221,74 @@ def load_paper_text_from_file_path(xml_file, mode = "elements"):
     """ 
     loads singe xml file from absolute path (used in inference)
     mode : "single" or "elements" """
-    if mode == "single":
-        # single
-        paper_text = UnstructuredXMLLoader(xml_file, mode = "single").load()[0].page_content
     
-    elif mode == "elements":
-        # element
-        docs = UnstructuredXMLLoader(xml_file, mode = "elements").load()
-        string = ""
-        for doc in docs:
-            # ignore useless metadata, + some 
-            if doc.metadata["category"] != "UncategorizedText":
-                string += doc.page_content + "\n"
-        paper_text = string
-    else:
-        raise ValueError
-    return paper_text
+    print(f"[DATASET_LOADER] Attempting to load paper from file: {xml_file}")
+    print(f"[DATASET_LOADER] File exists check: {os.path.exists(xml_file)}")
+    
+    # Check file size
+    try:
+        file_size = os.path.getsize(xml_file)
+        print(f"[DATASET_LOADER] File size: {file_size} bytes")
+        
+        # Preview file content
+        with open(xml_file, 'r', encoding='utf-8', errors='ignore') as f:
+            preview = f.read(500).replace('\n', ' ')
+            print(f"[DATASET_LOADER] File preview: {preview}...")
+    except Exception as e:
+        print(f"[DATASET_LOADER] Error accessing file: {e}")
+    
+    try:
+        if mode == "single":
+            # single
+            print("[DATASET_LOADER] Using 'single' mode for UnstructuredXMLLoader")
+            loader = UnstructuredXMLLoader(xml_file, mode="single")
+            docs = loader.load()
+            print(f"[DATASET_LOADER] Loaded {len(docs)} documents in single mode")
+            paper_text = docs[0].page_content
+        
+        elif mode == "elements":
+            # element
+            print("[DATASET_LOADER] Using 'elements' mode for UnstructuredXMLLoader")
+            loader = UnstructuredXMLLoader(xml_file, mode="elements")
+            docs = loader.load()
+            print(f"[DATASET_LOADER] Loaded {len(docs)} elements")
+            
+            # Provide summary of elements found
+            categories = {}
+            for doc in docs:
+                cat = doc.metadata.get("category", "Unknown")
+                categories[cat] = categories.get(cat, 0) + 1
+            print(f"[DATASET_LOADER] Element categories found: {categories}")
+            
+            string = ""
+            included_count = 0
+            for doc in docs:
+                # ignore useless metadata, + some 
+                if doc.metadata["category"] != "UncategorizedText":
+                    string += doc.page_content + "\n"
+                    included_count += 1
+            print(f"[DATASET_LOADER] {included_count} elements included in final text")
+            
+            paper_text = string
+            
+            # Log the length of the extracted text
+            if len(paper_text) < 100:
+                print(f"[DATASET_LOADER] WARNING: Extracted text is very short: {paper_text}")
+            else:
+                print(f"[DATASET_LOADER] Extracted text length: {len(paper_text)} characters")
+                print(f"[DATASET_LOADER] Text preview: {paper_text[:200].replace(chr(10), ' ')}...")
+        else:
+            raise ValueError(f"Invalid mode: {mode}. Expected 'single' or 'elements'")
+        
+        return paper_text
+    
+    except Exception as e:
+        print(f"[DATASET_LOADER] Error loading paper from file: {e}")
+        import traceback
+        print(f"[DATASET_LOADER] Traceback: {traceback.format_exc()}")
+        # Return placeholder text to avoid breaking the pipeline
+        error_message = f"ERROR: Failed to load file {os.path.basename(xml_file)}: {str(e)}"
+        return error_message
 
 def load_paper_text_from_url(paper_url):
     import requests
