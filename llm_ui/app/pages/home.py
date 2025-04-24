@@ -4,18 +4,22 @@ def show():
     st.title("Welcome to the LLM Data Profiler & Interaction App")
 
     st.markdown("""
-    This application leverages Large Language Models (LLMs) to help you interact with, manage, and profile your datasets.
-    You can perform various tasks such as:
+    This application leverages Large Language Models (LLMs) to help you interact with, manage, and profile your medical datasets.
+    How to use this application:
 
     *   **Managing Datasets:** Upload, view, and manage different datasets.
-    *   **Configuring Settings:** Adjust application parameters and configurations.
-    *   **Interacting as Consumer/Provider:** Engage with the system through dedicated interfaces for different user roles (Consumer QA, Provider).
-    *   **Profiling Data:** Run profiling tasks to gain insights into your data using LLMs.
+    *   **Configuring Settings:** Adjust application parameters and configurations for how the LLM responds.
+    *   **Interacting as Consumer/Provider:** Engage with the LLM to ask questions about datasets and uploade papers through the provider to save it in the database or 
+                talk to the LLM. 
+    *   
 
     **Limitations:**
     *   LLM performance can vary based on the complexity of the data and the specific task.
     *   The accuracy of profiling depends on the quality of the input data and the underlying model's capabilities.
     *   Ensure your configurations are set correctly for optimal results.
+    *   The search engine is able to serach for Name, PMID, Organism, study type, and ID. 
+    *   The provider page is able to upload XML files, PDF files (slightly more clunky), pubmed links and some DOIs (50% accuracy as of now).  
+                
 
     Use the sidebar or the buttons below to navigate to different sections of the application.
     """)

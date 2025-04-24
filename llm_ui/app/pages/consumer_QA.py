@@ -26,7 +26,7 @@ Available datasets:
 
 Question: {question}
 
-Please provide a comprehensive, accurate answer based on the dataset information provided above.
+Please provide a comprehensive, accurate answer based on the dataset information provided above and make sure to always give a PMID, pubmed URL or state your source in a apa7th style. 
 """
 
 def find_dataset_files(data_dir=None):
@@ -644,8 +644,7 @@ def show():
     # Create a container for the chat messages
     chat_display_container = st.container()
     # Apply the chat-container style to this container specifically
-    # Note: Applying height/overflow directly via st.container might not work reliably,
-    # so we rely on the CSS class defined earlier. We add a key for potential future JS interaction.
+
     chat_display_container.markdown("<div class='chat-container' id='chat-container-div'>", unsafe_allow_html=True) # Start the styled div
 
     with chat_display_container:
@@ -655,7 +654,7 @@ def show():
             for i, (time_stamp, question_text, answer_text) in enumerate(st.session_state.chat_history):
                 # User message
                 st.markdown(f"""
-                <div class='message-container' style='align-items: flex-end;'>
+                <div class='message-container' style='align-items: flex-end; margin-bottom: 15px;'>
                     <div class='user-message'>
                         {question_text}
                         
@@ -763,20 +762,20 @@ AVAILABLE DATASETS:
 {formatted_dataset_text}
 
 Based on the detailed dataset information above, which includes publication abstracts, experimental metadata, and file descriptions, provide a comprehensive answer to the question. 
-When addressing metadata specifically, focus on the experimental design, sample information, protocols, and technical details of the dataset itself.
+When addressing metadata specifically, focus on the experimental design, sample information, protocols, and technical details of the dataset itself and make sure to use source where it relevent, in apa7th or a pubmed URL or PMID.
 """
             
             # Show debug information
             with st.expander("Debug: Prompt being sent to LLM", expanded=False):
                 st.text(prompt[:1000] + "..." if len(prompt) > 1000 else prompt)
                 st.text(f"Total prompt length: {len(prompt)} characters")
-            
-            # Get the response with higher max_tokens to allow for detailed answers
-            settings = load_settings()
+
+            # Get the response using the LLM instance, which now loads its own settings.
+            # Pass None for max_tokens and temperature to use the settings loaded by the LLM class.
             output = st.session_state.llm.ask(
-                prompt, 
-                max_tokens=settings.get('max_tokens', 1000),  # Increased max tokens
-                temperature=settings.get('temperature', 0.2)  # Slightly lower temperature for more factual answers
+                prompt,
+                max_tokens=None, # Use settings loaded by LLM class
+                temperature=None # Use settings loaded by LLM class
             )
 
             # Store Q&A in chat history
