@@ -9,8 +9,7 @@ def show():
 
     *   **Managing Datasets:** Upload, view, and manage different datasets.
     *   **Configuring Settings:** Adjust application parameters and configurations for how the LLM responds.
-    *   **Interacting as Consumer/Provider:** Engage with the LLM to ask questions about datasets and uploade papers through the provider to save it in the database or 
-                talk to the LLM. 
+    *   **Interacting as Consumer/Provider:** Use the LLM to ask questions about datasets and uploade papers through the provider page to save it in the database.
     *   
 
     **Limitations:**

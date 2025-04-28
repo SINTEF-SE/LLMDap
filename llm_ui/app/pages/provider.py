@@ -1001,129 +1001,111 @@ def show():
                 if save_db_button:
                     if upsert_dataset:
                         try:
-                            # Get potentially edited data from the text area
-                            edited_data = json.loads(st.session_state.edited_json)
+                            # Get the full structure potentially edited from the text area
+                            edited_data_full = json.loads(st.session_state.edited_json)
+
+                            # --- Access the NESTED filled_form dictionary ---
+                            # Assuming the outer key is usually '0', or fallback to the first key's value
+                            first_key = next(iter(edited_data_full), None)
+                            if first_key:
+                                inner_data = edited_data_full.get(first_key, {})
+                                form_fields = inner_data.get("filled_form", {}) # Get the 'filled_form' dict
+                            else:
+                                form_fields = {} # Handle case where JSON is empty or malformed
+
+                            if not form_fields:
+                                st.error("Could not find 'filled_form' data within the processed JSON. Cannot save.")
+                                raise ValueError("Missing 'filled_form' in processed data")
+                            # --------------------------------------------------
+
                             source_info = st.session_state.get('source_info', {})
 
-                             # --- Extract Key Identifiers ---
-                             # PMID: Prioritize candidate from source_info, then edited data
+                            # --- Extract Key Identifiers ---
                             pmid_candidate = source_info.get('pmid_candidate')
-                            st.info(f"Debug (Save): PMID Candidate from source_info: {pmid_candidate}") # DEBUG
-                            pmid_from_edited = edited_data.get('pmid') or edited_data.get('PMID') # Check common casings
-                            st.info(f"Debug (Save): PMID from edited_data: {pmid_from_edited}") # DEBUG
-                            pmid = pmid_candidate or pmid_from_edited # Check candidate first
-                            # Fallback if still not found
-                            if not pmid or str(pmid).lower() == 'unknown': pmid = 'NO_PMID' # a clear placeholder
-                            st.info(f"Debug (Save): Final PMID for DB: {pmid}") # DEBUG
+                            # Check if pmid is directly in form_fields (less likely but possible)
+                            pmid_from_form = form_fields.get('pmid') or form_fields.get('PMID')
+                            pmid = pmid_candidate or pmid_from_form
+                            if not pmid or str(pmid).lower() == 'unknown': pmid = 'NO_PMID'
 
-                            # --- Fetch Metadata from PubMed if PMID is valid ---
+                            # --- Fetch Metadata from PubMed (useful for Title fallback) ---
                             pubmed_metadata = None
                             if pmid != 'NO_PMID':
                                 pubmed_metadata = fetch_pubmed_metadata(pmid)
-                            # ----------------------------------------------------
 
-                             # Accession: Prioritize from edited data, then generate a unique one
-                            accession = edited_data.get('accession') or edited_data.get('Accession')
-                            if not accession or str(accession).lower() == 'unknown':
-                                # Generate a more descriptive unique ID if possible
+                            # Accession: Generate a unique one if not in form_fields
+                            accession_from_form = form_fields.get('accession') or form_fields.get('Accession')
+                            if not accession_from_form or str(accession_from_form).lower() == 'unknown':
                                 base_name = custom_dataset_name.strip() or source_info.get('name', 'user_dataset')
                                 safe_base = re.sub(r'[^\w\-]+', '_', base_name).strip('_') if base_name else 'dataset'
-                                accession = f"USER_{safe_base}_{hash(st.session_state.edited_json) % 10000}" # Shorter hash
+                                accession = f"USER_{safe_base}_{hash(st.session_state.edited_json) % 10000}"
+                            else:
+                                accession = accession_from_form
 
-                            # Title: Prioritize custom input, then edited data, then source filename
+                            # Title: Prioritize custom input, then PubMed metadata, then fallback
                             title = custom_dataset_name.strip() or \
                                     (pubmed_metadata.get('title') if pubmed_metadata else None) or \
-                                    edited_data.get('title') or \
-                                    edited_data.get('Title') or \
-                                    source_info.get('name', f"Dataset {accession}") # Fallback
+                                    source_info.get('name', f"Dataset {accession}")
 
-                            # --- Prepare Data for Database ---
+                            # --- Prepare Data for Database - Prioritize Profiler Output ---
                             db_data = {
                                 'title': title,
                                 'accession': accession,
                                 'pmid': pmid,
-                                'description': edited_data.get('description', 'User-provided dataset via Provider page.'),
-                                'organism': edited_data.get('organism'), # Keep existing logic for organism for now
-                                #'study_type': pubmed_metadata.get('study_type') if pubmed_metadata else edited_data.get('study_type'), # Prioritize fetched study type
-                                'source': 'user_provider', # Mark as user-provided
+                                'description': form_fields.get('description', 'User-provided dataset via Provider page.'),
+                                'source': 'user_provider',
                                 'original_file': source_info.get('value', source_info.get('name', 'Unknown')),
-                                # Add other fields if they exist in edited_data
-                                'hardware': edited_data.get('hardware'),
-                                'organism_part': edited_data.get('organism_part'),
-                                'experimental_designs': edited_data.get('experimental_designs'),
-                                'assay_by_molecule': edited_data.get('assay_by_molecule'),
-                                # Add any other relevant fields your db_utils expects
+                                # Initialize ALL expected DB columns to None
+                                'organism': None,
+                                'study_type': None,
+                                'hardware': None,
+                                'organism_part': None, # <<< ENSURE THIS LINE EXISTS
+                                'experimental_designs': None,
+                                'assay_by_molecule': None,
+                                'technology': None,
+                                # Add any other columns your DB table expects here
                             }
 
-                            # --- Determine Study Type with Prioritization (Simplified) ---
-                            study_type_final = edited_data.get('study_type') # Priority 1: Edited data
-                            if not study_type_final and pubmed_metadata and pubmed_metadata.get('pubtype_general'):
-                                # Priority 2: General Pub Type (Fallback)
-                                study_type_final = pubmed_metadata['pubtype_general']
-                            # Priority 3: Fallback to None or empty string if nothing found
-                            db_data['study_type'] = study_type_final if study_type_final else None
-                            st.info(f"Debug (Save): Final Study Type for DB: {db_data['study_type']}") # DEBUG
-                            # -------------------------------------------------
+                            # --- Map profiler output (form_fields) to db_data keys ---
+                            # (The loop below this should now work correctly for organism_part)
+                            for key, value in form_fields.items():
+                                # Remove the trailing '_number' if it exists to get the base field name
+                                base_key = re.sub(r'_\d+$', '', key)
 
-                            # --- Determine Organism with Prioritization ---
-                            # List from data/interesting_fields.txt (case-insensitive)
-                            VALID_ORGANISMS_LOWER = {
-                                'montastraea faveolata', 'mus musculus', 'saccharomyces cerevisiae',
-                                'rattus norvegicus', 'homo sapiens', 'pichia pastoris',
-                                'staphylococcus epidermidis', 'macaca mulatta', 'staphylococcus aureus',
-                                'danio rerio', 'schizosaccharomyces pombe'
-                            }
-                            organism_final = edited_data.get('organism') # Priority 1: Edited data
-                            if not organism_final and pubmed_metadata and pubmed_metadata.get('mesh_organisms'):
-                                # Priority 2: Check fetched MeSH organisms against valid list
-                                for mesh_org in pubmed_metadata['mesh_organisms']:
-                                     # Simple mapping for common terms
-                                     org_to_check = mesh_org.lower()
-                                     if org_to_check == 'humans': org_to_check = 'homo sapiens'
-                                     elif org_to_check == 'mice': org_to_check = 'mus musculus'
-                                     elif org_to_check == 'rats': org_to_check = 'rattus norvegicus'
-                                     # Add other mappings if needed
+                                # If this base_key matches a column name in our db_data, update it
+                                if base_key in db_data:
+                                    # Prioritize the value from the profiler (form_fields)
+                                    if value is not None and value != "":
+                                        db_data[base_key] = value
+                                else:
+                                    # Optional: Log keys from profiler output that don't match DB columns
+                                    print(f"[Provider Save] Warning: Profiler key '{key}' (base: '{base_key}') not found in db_data map.")
 
-                                     if org_to_check in VALID_ORGANISMS_LOWER:
-                                          # Find the original casing from the valid list
-                                          for valid_org in VALID_ORGANISMS_LOWER:
-                                               if valid_org == org_to_check:
-                                                    # Find the correctly cased version (a bit inefficient but works)
-                                                    original_casing_list = [
-                                                        'Montastraea faveolata', 'Mus musculus', 'Saccharomyces cerevisiae',
-                                                        'Rattus norvegicus', 'Homo sapiens', 'Pichia pastoris',
-                                                        'Staphylococcus epidermidis', 'Macaca mulatta', 'Staphylococcus aureus',
-                                                        'Danio rerio', 'Schizosaccharomyces pombe'
-                                                    ]
-                                                    for org_cased in original_casing_list:
-                                                         if org_cased.lower() == valid_org:
-                                                              organism_final = org_cased
-                                                              break
-                                                    break # Found a match, stop checking mesh_orgs
-                                     if organism_final: break # Exit outer loop once a match is found
-                            # Priority 3: Fallback to None
-                            db_data['organism'] = organism_final if organism_final else None
-                            st.info(f"Debug (Save): Final Organism for DB: {db_data['organism']}") # DEBUG
-                            # -------------------------------------------------
-
+                            # --- Log final values before saving ---
+                            st.info(f"Debug (Save): Final Organism for DB: {db_data.get('organism')}")
+                            # Add log for organism_part
+                            st.info(f"Debug (Save): Final Organism Part for DB: {db_data.get('organism_part')}")
+                            st.info(f"Debug (Save): Final Study Type for DB: {db_data.get('study_type')}")
+                            st.info(f"Debug (Save): Final Hardware for DB: {db_data.get('hardware')}")
 
                             # --- Save JSON and Update DB ---
                             user_datasets_dir = os.path.join(project_root, 'llm_ui', 'app', 'user_datasets')
                             os.makedirs(user_datasets_dir, exist_ok=True)
-                            # Use the potentially unique accession for the filename
                             safe_filename = re.sub(r'[^\w\-_\.]', '_', f"user_dataset_{accession}.json")
                             save_path = os.path.join(user_datasets_dir, safe_filename)
 
-                            # Save the potentially edited JSON data (the 'form' part)
+                            # Save the original *full* profiler output structure
+                            # (or just form_fields if you prefer, but saving full structure might be useful)
                             with open(save_path, "w") as f:
-                                json.dump(edited_data, f, indent=4)
-                            st.info(f"Saved dataset JSON to: {save_path}")
+                                json.dump(edited_data_full, f, indent=4) # Save the full structure
+                            st.info(f"Saved full profiler output JSON to: {save_path}")
 
-                            # Add the file_path (primary key for DB) and upsert
+                            # Add the file_path (primary key for DB) and upsert using the mapped db_data
                             db_data['file_path'] = save_path
                             upsert_dataset(db_data)
-                            st.success(f"Dataset '{title}' saved to database!")
+                            st.success(f"Dataset '{db_data['title']}' saved to database!")
+
                         except json.JSONDecodeError: st.error("Cannot save to database: Edited JSON is invalid.")
+                        except ValueError as ve: st.error(f"Cannot save to database: {ve}") # Catch specific error
                         except Exception as e: st.error(f"Error saving to database: {e}"); import traceback; st.error(traceback.format_exc())
                     else: st.error("Database function (upsert_dataset) is not available.")
 

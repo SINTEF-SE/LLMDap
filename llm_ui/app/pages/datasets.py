@@ -186,15 +186,46 @@ def show():
                         if desc: st.markdown(f"*{desc}*")
 
                     with col2:
-                        organism = dataset.get('organism', 'Unknown')
-                        if organism and organism != 'N/A' and organism != 'Unknown': st.markdown(f"🧬 **Organism:** {organism}")
-                        study_type = dataset.get('study_type', 'Unknown')
-                        if study_type and study_type != 'N/A' and study_type != 'Unknown': st.markdown(f"🔬 **Study type:** {study_type}")
+                        # --- Existing Fields ---
+                        organism = dataset.get('organism') # Removed default 'Unknown' to check existence
+                        if organism and organism != 'N/A': # Check if value exists and is not 'N/A'
+                            st.markdown(f"🧬 **Organism:** {organism}")
+
+                        study_type = dataset.get('study_type')
+                        if study_type and study_type != 'N/A':
+                            st.markdown(f"🔬 **Study type:** {study_type}")
+
+                        # --- New Fields ---
+                        organism_part = dataset.get('organism_part')
+                        if organism_part and organism_part != 'N/A':
+                            st.markdown(f"🔬 **Organism Part:** {organism_part}") # Using same icon as study type, adjust if needed
+
+                        exp_design = dataset.get('experimental_designs')
+                        if exp_design and exp_design != 'N/A':
+                             # Shorten if too long for display
+                            display_design = exp_design[:40] + '...' if len(exp_design) > 40 else exp_design
+                            st.markdown(f"📊 **Design:** {display_design}")
+
+                        assay = dataset.get('assay_by_molecule')
+                        if assay and assay != 'N/A':
+                            st.markdown(f"🧪 **Assay:** {assay}")
+
+                        hardware = dataset.get('hardware')
+                        if hardware and hardware != 'N/A':
+                             display_hw = hardware[:40] + '...' if len(hardware) > 40 else hardware
+                             st.markdown(f"💻 **Hardware:** {display_hw}")
+
+                        # --- Existing ID/PMID ---
                         st.markdown(f"📋 **ID:** `{dataset.get('accession', 'Unknown')}`")
                         pmid = dataset.get('pmid')
                         pmid_str = str(pmid) if pmid is not None else ''
-                        if pmid and pmid_str not in ['schema', 'bulk', 'unknown', 'uploaded'] and not pmid_str.startswith('provider_'):
+                        # Improved check for valid-looking PMIDs
+                        if pmid_str and pmid_str.isdigit() and len(pmid_str) > 5:
                              st.markdown(f"📝 **PMID:** `{pmid_str}`")
+                        # Optional: Log ignored PMIDs for debugging
+                        # elif pmid and pmid_str not in ['schema', 'bulk', 'unknown', 'uploaded'] and not pmid_str.startswith('provider_'):
+                        #    print(f"[Dataset Display] Ignored invalid PMID value: {pmid_str} for Accession: {dataset.get('accession')}")
+
 
                     with col3:
                         # Use file_path (PRIMARY KEY) for the most stable unique ID for the key
