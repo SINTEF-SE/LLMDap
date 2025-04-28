@@ -8,6 +8,7 @@ import sys
 import requests
 from xml.etree import ElementTree as ET
 import time
+from typing import List, Dict, Any, Optional
 
 # Define project root relative to this file's location
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
@@ -292,58 +293,76 @@ def _extract_metadata_for_db(file_path):
 
     return metadata
 
-def _extract_metadata_from_bulk_entry(entry_data, pmid, file_basename):
-    """Helper to extract metadata from a single entry within a bulk JSON file."""
-    metadata = {
-        'pmid': pmid,
-        'title': f"PMID: {pmid} from {file_basename}", # Default title, might be updated by PubMed fetch
-        'accession': f'BULK-{pmid}',
-        'organism': "Unknown", 'study_type': "Unknown",
-        'description': None, # Default description to None
-        'source': 'bulk_processed',
-        'file_path': f"{file_basename}#PMID{pmid}", # Pseudo-path
+def _extract_metadata_from_bulk_entry(entry: Dict[str, Any], file_path: str) -> Dict[str, Any]:
+    """Extracts and maps metadata from a single entry within a bulk JSON file."""
+    metadata = { # Initialize with DB column names
+        'title': None,
+        'description': None,
+        'accession': None,
+        'pmid': None,
+        'organism': None,
+        'study_type': None,
+        'hardware': None,
+        'organism_part': None,
+        'experimental_designs': None,
+        'assay_by_molecule': None,
+        'technology': None,
+        'source': 'bulk_processed', # Mark source
+         # Keep file_path for reference, but accession will be primary key if available
+        'file_path': None # Will be set based on accession later if possible
     }
-    metadata.update({k: None for k in [
-        'hardware', 'organism_part', 'experimental_designs', 'assay_by_molecule',
-        'technology', 'sample_count', 'release_date', 'experimental_factors']})
 
-    if isinstance(entry_data, dict):
-        field_mappings = {
-            'organism': ['organism_16', 'organism_17'], 'study_type': ['study_type_18'],
-            'hardware': ['hardware_4'], 'organism_part': ['organism_part_5'],
-            'experimental_designs': ['experimental_designs_10'], 'assay_by_molecule': ['assay_by_molecule_14'],
-            'technology': ['technology_15'], 'sample_count': ['sample_count_13'],
-            'release_date': ['releasedate_12'], 'experimental_factors': ['experimental_factors_20'],
-            'title': ['title_11']
-        }
-        for canonical_field, indexed_keys in field_mappings.items():
-            found_value = None
-            for key in indexed_keys:
-                if key in entry_data and entry_data[key]:
-                    value = entry_data[key]
-                    if isinstance(value, list):
-                        if len(value) > 0: found_value = str(value[0])
-                    else:
-                        found_value = str(value)
-                    if found_value:
-                        metadata[canonical_field] = found_value
-                        break
-            if not found_value and canonical_field in ['organism', 'study_type']:
-                 metadata[canonical_field] = "Unknown"
+    try:
+        # --- Direct Mapping (Adjust keys based on actual bulk JSON structure) ---
+        metadata['accession'] = entry.get('accession')
+        metadata['title'] = entry.get('title')
+        metadata['description'] = entry.get('description')
+        metadata['organism'] = entry.get('organism') # Assumes 'organism' key exists
+        metadata['pmid'] = entry.get('pmid')
 
-    # Set default title (will be updated later)
-    if not metadata.get('title') or metadata['title'].startswith("PMID:"):
-        metadata['title'] = f"PMID: {pmid} from {file_basename}"
-    if not metadata.get('organism'): metadata['organism'] = "Unknown"
-    if not metadata.get('study_type'): metadata['study_type'] = "Unknown"
+        # --- Mapping based on common ArrayExpress / SDRF concepts ---
+        # Map experimenttype to study_type
+        metadata['study_type'] = entry.get('experimenttype') or entry.get('study_type') # Prioritize specific key if available
 
-    # Convert all values to string, default missing crucial text fields to None
-    for key in metadata:
-        if metadata[key] is not None: metadata[key] = str(metadata[key])
-        elif key in ['organism', 'study_type', 'title', 'accession', 'pmid', 'source']:
-             metadata[key] = "Unknown" # Keep Unknown for these required fields
-        # else: description and other non-essential fields remain None if not found
-    return metadata
+        # Map performer/protocol info to hardware/technology
+        # This might need refinement based on how hardware is listed (e.g., in 'performer' or 'protocol' fields)
+        metadata['hardware'] = entry.get('performer') or entry.get('hardware') # Example: use 'performer' if 'hardware' key missing
+        metadata['technology'] = entry.get('technology') # If a specific technology field exists
+
+        # --- Attempt to extract other fields (Requires knowing the bulk JSON structure) ---
+        # These are examples - **adjust the entry.get('key_name') based on your actual bulk JSON keys**
+        metadata['organism_part'] = entry.get('organism_part') or entry.get('sample_characteristic_organism_part') # Example keys
+        metadata['experimental_designs'] = entry.get('experimental_design') or entry.get('experiment_design') # Example keys
+        metadata['assay_by_molecule'] = entry.get('assay_name') or entry.get('assay_type') # Example keys
+
+
+        # --- Set file_path based on accession for uniqueness if needed ---
+        # The primary key in the DB is file_path, so we need a unique value.
+        # Using the accession (if available) combined with the source file ensures uniqueness.
+        acc = metadata['accession']
+        if acc:
+            metadata['file_path'] = f"{file_path}::{acc}" # Combine source file and accession
+        else:
+            # Fallback if no accession - this might cause issues if multiple entries lack accession
+            metadata['file_path'] = f"{file_path}::entry_{hash(json.dumps(entry, sort_keys=True))}"
+
+
+        # Simple cleanup
+        cleaned_metadata = {k: v.strip() if isinstance(v, str) else v for k, v in metadata.items() if v is not None and v != ""} # Remove None and empty strings
+        # Ensure essential keys for DB are present, even if None from above
+        cleaned_metadata.setdefault('file_path', metadata['file_path'])
+        cleaned_metadata.setdefault('accession', metadata['accession'])
+
+
+        #print(f"[DB Utils Bulk Extract] Extracted for {metadata['accession']}: { {k:v for k,v in cleaned_metadata.items() if k!='file_path'} }") # Log extracted data
+        return cleaned_metadata
+
+    except Exception as e:
+        acc = entry.get('accession', 'UNKNOWN_ACC')
+        print(f"[DB Utils Bulk Extract] Error extracting metadata for entry {acc} in {file_path}: {e}")
+        # Return minimal info on error
+        return {'file_path': f"{file_path}::error_{acc}", 'accession': acc, 'title': f"Error Extracting {acc}"}
+
 
 # --- PubMed Title Fetching ---
 def _fetch_pubmed_titles_batch(pmids):
@@ -515,89 +534,83 @@ def scan_and_update_db(directories):
 
 
 # --- Data Retrieval Functions ---
-def get_dataset_count(search_term=None):
-    """Gets the total count of datasets, optionally filtered by search term."""
+def get_dataset_count(search_term: Optional[str] = None) -> int:
+    """Gets the total number of datasets, optionally filtered by a search term across multiple fields."""
     conn = None
-    count = 0
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        # Base query filters out placeholder titles
-        sql = """
-            SELECT COUNT(*) FROM datasets
-            WHERE title IS NOT NULL
-              AND title != 'Unknown'
-              AND NOT title LIKE 'Dataset %'
-              AND NOT title LIKE 'PMID:%'
-              AND NOT title LIKE 'User Dataset %'
-        """
+        sql = "SELECT COUNT(*) FROM datasets"
         params = []
-        if search_term:
-            search_pattern = f"%{search_term}%"
-            # Add search conditions ANDed with the base filter
-            sql += """
-                AND (accession LIKE ? OR pmid LIKE ? OR title LIKE ? OR
-                     organism LIKE ? OR study_type LIKE ? OR description LIKE ? OR
-                     organism_part LIKE ? OR technology LIKE ? OR experimental_factors LIKE ?)
-            """
-            params = [search_pattern] * 9
+
+        if search_term and search_term.strip(): # Ensure search term is not empty
+            search_term = search_term.strip()
+            # Define columns to search
+            search_columns = [
+                'title', 'description', 'accession', 'pmid', 'organism',
+                'study_type', 'hardware', 'organism_part', 'experimental_designs',
+                'assay_by_molecule', 'technology', 'source'
+            ]
+            # Build WHERE clause dynamically
+            where_clauses = [f"{col} LIKE ?" for col in search_columns if col] # Filter out potential None/empty strings if list was dynamic
+            if where_clauses: # Check if there are clauses to add
+                sql += " WHERE " + " OR ".join(where_clauses)
+                # Add parameter for each clause
+                params = [f'%{search_term}%'] * len(where_clauses)
 
         cursor.execute(sql, params)
-        result = cursor.fetchone()
-        if result: count = result[0]
+        count = cursor.fetchone()[0]
+        return count if count is not None else 0
     except sqlite3.Error as e:
-        print(f"[ERROR][DB_UTILS] Database error counting datasets: {e}")
+        print(f"Database error in get_dataset_count: {e}")
+        return 0
     finally:
-        if conn: conn.close()
-    return count
+        if conn:
+            conn.close()
 
-def get_datasets_page(page_number, page_size, search_term=None):
-    """Gets a specific page of datasets, optionally filtered."""
+def get_datasets_page(page_num: int, page_size: int, search_term: Optional[str] = None) -> List[sqlite3.Row]:
+    """Gets a single page of datasets, optionally filtered by a search term across multiple fields."""
     conn = None
-    datasets = []
+    offset = page_num * page_size
     try:
         conn = get_db_connection()
+        # Use Row factory for dictionary-like access
+        conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-        offset = page_number * page_size
-        select_cols = [
-            'file_path', 'accession', 'pmid', 'title', 'organism', 'study_type',
-            'description', 'source', 'organism_part', 'technology', 'sample_count',
-            'release_date', 'experimental_factors', 'hardware', 'experimental_designs',
-            'assay_by_molecule'
-        ]
-        # Base query filters out placeholder titles
-        sql = f"""
-            SELECT {', '.join(select_cols)} FROM datasets
-            WHERE title IS NOT NULL
-              AND title != 'Unknown'
-              AND NOT title LIKE 'Dataset %'
-              AND NOT title LIKE 'PMID:%'
-              AND NOT title LIKE 'User Dataset %'
-        """
+
+        sql = "SELECT * FROM datasets"
         params = []
 
-        if search_term:
-            search_pattern = f"%{search_term}%"
-            # Add search conditions ANDed with the base filter
-            sql += """
-                AND (accession LIKE ? OR pmid LIKE ? OR title LIKE ? OR
-                     organism LIKE ? OR study_type LIKE ? OR description LIKE ? OR
-                     organism_part LIKE ? OR technology LIKE ? OR experimental_factors LIKE ?)
-            """
-            params = [search_pattern] * 9
+        if search_term and search_term.strip(): # Ensure search term is not empty
+            search_term = search_term.strip()
+             # Define columns to search (should match get_dataset_count)
+            search_columns = [
+                'title', 'description', 'accession', 'pmid', 'organism',
+                'study_type', 'hardware', 'organism_part', 'experimental_designs',
+                'assay_by_molecule', 'technology', 'source'
+            ]
+            # Build WHERE clause dynamically
+            where_clauses = [f"{col} LIKE ?" for col in search_columns if col]
+            if where_clauses: # Check if there are clauses to add
+                sql += " WHERE " + " OR ".join(where_clauses)
+                 # Add parameter for each clause
+                params = [f'%{search_term}%'] * len(where_clauses)
 
-        sql += " ORDER BY accession LIMIT ? OFFSET ?"
-        params.extend([page_size, offset])
+        # Add ORDER BY, LIMIT and OFFSET - these are safe with f-strings as they are integers
+        sql += f" ORDER BY last_updated DESC LIMIT {int(page_size)} OFFSET {int(offset)}"
+
+        #print(f"[DB UTILS get_datasets_page] SQL: {sql}") # Uncomment for debugging SQL
+        #print(f"[DB UTILS get_datasets_page] PARAMS: {params}") # Uncomment for debugging params
 
         cursor.execute(sql, params)
-        datasets = [dict(row) for row in cursor.fetchall()]
+        datasets = cursor.fetchall()
+        return datasets if datasets else []
     except sqlite3.Error as e:
-        print(f"[ERROR][DB_UTILS] Database error fetching page: {e}")
-        print(f"  SQL: {sql}")
-        print(f"  Params: {params}")
+        print(f"Database error in get_datasets_page: {e}")
+        return []
     finally:
-        if conn: conn.close()
-    return datasets
+        if conn:
+            conn.close()
 
 def get_datasets_by_ids(ids):
     """Gets full dataset details for a list of IDs (accession or file_path)."""
