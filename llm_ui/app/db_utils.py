@@ -18,7 +18,7 @@ DATA_DIR = os.path.join(project_root, 'data')
 
 # --- DB Connection and Initialization ---
 def get_db_connection():
-    """Establishes a connection to the SQLite database."""
+    """Establishes a connection to the SQLite database.""" 
     conn = sqlite3.connect(DB_PATH, timeout=10) # Increased timeout
     conn.row_factory = sqlite3.Row
     return conn
