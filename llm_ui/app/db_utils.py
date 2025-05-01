@@ -220,15 +220,120 @@ def _extract_metadata_for_db(file_path):
         'sample_count', 'release_date', 'experimental_factors']})
 
     is_user_saved_file = 'user_datasets' in file_path.replace(os.sep, '/')
-    is_user_provider_source = isinstance(data, dict) and data.get('source') == 'user_provider'
+    # Check source field within JSON as well, if it exists
+    is_user_provider_source_in_json = isinstance(data, dict) and data.get('source') == 'user_provider'
 
-    if is_user_saved_file or is_user_provider_source:
-        metadata['source'] = 'user_provider'
-        metadata.update({k: data.get(k) for k in metadata if k in data})
-        if not metadata.get('title'): metadata['title'] = f"User Dataset {accession}"
+    if is_user_saved_file or is_user_provider_source_in_json:
+        # --- REVISED LOGIC for User Provider Files ---
+        metadata = {'file_path': file_path, 'source': 'user_provider'}
+
+        # 1. Initialize metadata with file_path and source
+        metadata = {'file_path': file_path, 'source': 'user_provider'}
+        # Initialize all other potential DB columns to None
+        db_columns = [
+            'accession', 'pmid', 'title', 'organism', 'study_type', 'description',
+            'hardware', 'organism_part', 'experimental_designs', 'assay_by_molecule',
+            'technology', 'sample_count', 'release_date', 'experimental_factors'
+        ]
+        for col in db_columns:
+            metadata[col] = None
+
+        # 2. Attempt to extract Accession and PMID primarily from filename, then JSON top-level
+        metadata['accession'] = user_accession_match.group(1) if user_accession_match else data.get('accession')
+        metadata['pmid'] = pmid_match.group(1) if pmid_match else data.get('pmid')
+
+        # 3. Find the 'filled_form' data
+        form_data = None
+        if isinstance(data, dict):
+            if "0" in data and isinstance(data["0"], dict) and "filled_form" in data["0"]:
+                form_data = data["0"].get("filled_form")
+            elif "form" in data and isinstance(data["form"], dict):
+                 form_data = data.get("form")
+            elif "filled_form" in data and isinstance(data["filled_form"], dict):
+                form_data = data.get("filled_form")
+            # If not nested, maybe the top level IS the form data? Check for a known key.
+            elif 'study_type_18' in data or 'organism_part_5' in data: # Check for example suffixed keys
+                 form_data = data
+
+        # 3. Extract data from form_data (handling suffixes)
+        db_columns = [ # List of actual DB columns (excluding file_path, source, last_updated)
+            'accession', 'pmid', 'title', 'organism', 'study_type', 'description',
+            'hardware', 'organism_part', 'experimental_designs', 'assay_by_molecule',
+            'technology', 'sample_count', 'release_date', 'experimental_factors'
+        ]
+        if isinstance(form_data, dict):
+            extracted_count = 0
+            for key_in_json, value in form_data.items():
+                if value is None: continue
+                base_key = re.sub(r'_\d+$', '', key_in_json)
+                if base_key in db_columns:
+                    # Prioritize extracted value, even if it overwrites initial pmid/accession from filename
+                    metadata[base_key] = value.strip() if isinstance(value, str) else value
+                    extracted_count += 1
+            print(f"[DB Utils User Extract] Extracted {extracted_count} fields via suffix logic for: {os.path.basename(file_path)}")
+
+            # 3b. Also check for standard (non-suffixed) keys directly within form_data
+            # This will overwrite filename/top-level pmid/accession if found here
+            for col in db_columns:
+                 if col in form_data and form_data[col] is not None:
+                      # Check if already set by suffix logic, only overwrite if standard key provides value
+                      if metadata.get(col) is None:
+                           metadata[col] = form_data[col].strip() if isinstance(form_data[col], str) else form_data[col]
+                           print(f"[DB Utils User Extract] Found standard field '{col}' in form_data for: {os.path.basename(file_path)}")
+                           # No need to increment count again, just ensuring standard keys are checked
+
+            if extracted_count == 0 and not any(col in form_data for col in db_columns): # Refined warning
+                 print(f"[DB Utils User Extract] Warning: Found 'filled_form' but extracted 0 fields for {os.path.basename(file_path)}. Keys might not match DB columns or expected format.")
+
+        else:
+             print(f"[DB Utils User Extract] Warning: Could not find 'filled_form' structure in {os.path.basename(file_path)}. Attempting top-level keys.")
+             # Fallback: Check top-level JSON for standard fields ONLY if form_data wasn't found
+             if isinstance(data, dict):
+                  for col in db_columns:
+                       # Check top-level only if not already populated
+                       if metadata.get(col) is None and col in data and data.get(col) is not None:
+                            metadata[col] = data[col].strip() if isinstance(data[col], str) else data[col]
+                            print(f"[DB Utils User Extract] Found top-level field '{col}' for: {os.path.basename(file_path)}")
+
+        # 4. Attempt to extract PMID from context snippets if still missing/invalid
+        current_pmid = metadata.get('pmid')
+        if not current_pmid or not str(current_pmid).isdigit():
+            print(f"[DB Utils User Extract] PMID invalid ('{current_pmid}'). Searching context snippets...")
+            context_data = None
+            if isinstance(data, dict):
+                 if "0" in data and isinstance(data["0"], dict) and "context" in data["0"]:
+                      context_data = data["0"].get("context")
+                 elif "context" in data and isinstance(data["context"], dict):
+                      context_data = data.get("context")
+
+            if isinstance(context_data, dict):
+                 for context_key, context_snippet in context_data.items():
+                      if isinstance(context_snippet, str):
+                           match = re.search(r'\b(?:PMID|PubMed\s*ID)\s*[:\-]?\s*(\d{7,9})\b', context_snippet, re.IGNORECASE)
+                           if match and match.group(1):
+                                found_pmid = match.group(1)
+                                metadata['pmid'] = found_pmid # Update metadata with found PMID
+                                current_pmid = found_pmid # Update current_pmid for title fetch
+                                print(f"[DB Utils User Extract] Found PMID {found_pmid} via regex in context snippet '{context_key}'.")
+                                break # Stop searching once found
+
+        # 5. Fetch Title from PubMed if missing and PMID is now valid
+        if metadata.get('title') is None and current_pmid and str(current_pmid).isdigit():
+             print(f"[DB Utils User Extract] Attempting to fetch title for PMID {current_pmid} (potentially found in context) for {os.path.basename(file_path)}")
+             fetched_title = _fetch_pubmed_title(current_pmid)
+             if fetched_title:
+                  metadata['title'] = fetched_title
+
+        # 6. Apply final defaults only if fields are still missing
+        metadata.setdefault('title', f"User Dataset {metadata.get('accession', 'Unknown')}")
+        metadata.setdefault('description', 'User-provided dataset via Provider page.')
+        metadata.setdefault('organism', 'Unknown')
+        metadata.setdefault('study_type', 'Unknown')
+        # --- END REVISED LOGIC ---
+
     elif any(pattern in filename for pattern in ["arxpr_simplified.json", "arxpr_metadataset", "arxpr2_25"]):
          return None # Skip bulk files in this function
-    else:
+    else: # Handle ArrayExpress files (existing logic - slightly simplified)
         metadata['source'] = 'arrayexpress'
         if isinstance(data, dict):
             data_lower = {k.lower(): v for k, v in data.items() if isinstance(k, str)}

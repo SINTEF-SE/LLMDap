@@ -639,13 +639,44 @@ def extract_dataset_metadata(dataset):
     # --- Group 3: User Specific Data (Profiler JSON, Full Text) ---
     # This block only runs for user_provider source
     if source == 'user_provider':
-        # (Keep the logic for reading _meta.json and _fulltext.txt here, appending to metadata_groups['user_specific'])
-        # Example placeholder:
-        metadata_groups['user_specific'].append("**Profiler Extracted Fields (Specific):**")
-        metadata_groups['user_specific'].append("- Example Profiler Field: Value")
-        metadata_groups['user_specific'].append("\n**Full Text (Excerpt):**")
-        metadata_groups['user_specific'].append("Lorem ipsum...")
-        
+        # --- MODIFIED: Read JSON and extract context snippets ---
+        user_file_path = dataset.get('file_path')
+        if user_file_path and os.path.exists(user_file_path):
+            try:
+                with open(user_file_path, 'r', encoding='utf-8') as f:
+                    user_data = json.load(f)
+
+                # Locate the context dictionary (assuming same structure as before)
+                context_data = None
+                if isinstance(user_data, dict):
+                    if "0" in user_data and isinstance(user_data["0"], dict) and "context" in user_data["0"]:
+                        context_data = user_data["0"].get("context")
+                    elif "context" in user_data and isinstance(user_data["context"], dict):
+                        context_data = user_data.get("context")
+
+                if isinstance(context_data, dict):
+                    metadata_groups['user_specific'].append("\n### Supporting Context Snippets:")
+                    added_snippets = 0
+                    for context_key, snippet in context_data.items():
+                         if isinstance(snippet, str) and snippet.strip():
+                              # Clean up key name (remove suffix) for display
+                              base_key_display = re.sub(r'_\d+$', '', context_key).replace('_', ' ').capitalize()
+                              # Limit snippet length for prompt
+                              display_snippet = snippet[:300] + '...' if len(snippet) > 300 else snippet
+                              metadata_groups['user_specific'].append(f"**{base_key_display}:** {display_snippet}")
+                              added_snippets += 1
+                    if added_snippets == 0:
+                         metadata_groups['user_specific'].append("- No context snippets found in the saved JSON file.")
+                else:
+                    metadata_groups['user_specific'].append("- Could not locate context snippets in the saved JSON file.")
+
+            except json.JSONDecodeError:
+                metadata_groups['user_specific'].append(f"- Error: Could not parse the JSON file: {os.path.basename(user_file_path)}")
+            except Exception as e:
+                metadata_groups['user_specific'].append(f"- Error reading user data file {os.path.basename(user_file_path)}: {e}")
+        else:
+            metadata_groups['user_specific'].append("- Associated user JSON file not found or path missing.")
+        # --- END MODIFICATION ---
 
 
     # --- Group 4: ArrayExpress API Details (if applicable) ---
