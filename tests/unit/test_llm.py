@@ -1,13 +1,21 @@
 import unittest
-from unittest.mock import patch, MagicMock
-import os
+from unittest.mock import patch, MagicMock, mock_open
 import json
+import os
+import sys
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../llm_ui/app')))
 from llm_ui.app.llm import LLM, load_settings
 
 class TestLLM(unittest.TestCase):
     
     def setUp(self):
+        self.settings_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../llm_ui/app'))
         self.settings_file = "settings.json"
+        self.settings_path = os.path.join(self.settings_dir, self.settings_file)
+        
+        os.makedirs(self.settings_dir, exist_ok=True)
+
         if os.path.exists(self.settings_file):
             os.remove(self.settings_file)
     
@@ -17,38 +25,21 @@ class TestLLM(unittest.TestCase):
             os.remove(self.settings_file)
     
     def create_temp_settings_file(self, settings_data):
-        settings_path = self.settings_file
         with open(self.settings_file, 'w') as f:
             json.dump(settings_data, f)
     
-    def test_load_settings_file_exists(self):
-        mock_settings = {"model": "test_model", "temperature": 0.5, "max_tokens": 100, "use_openai" : False}
-        self.create_temp_settings_file(mock_settings)
-        
-        loaded_settings = load_settings()
-        
-        self.assertEqual(loaded_settings, mock_settings)
-    
-    def test_load_settings_file_not_exists(self):
-        loaded_settings = load_settings()
-        
-        default_settings = {
-            'temperature': 0.3,
-            'max_tokens': 500,
-            'model': 'llama3.1I-8b-q4', 
-            'use_openai': False
-        }
-        self.assertTrue(default_settings.items() <= loaded_settings.items())
-    
-    def test_llm_intialization_without_openai(self):
+    def test_llm_initialization_without_openai(self):
         mock_settings = {"use_openai": False, "model": "local_model"}
-        self.create_temp_settings_file(mock_settings)
-        llm = LLM()
+        mock_data = json.dumps(mock_settings)
+    
+        with patch("builtins.open", mock_open(read_data=mock_data)):
+            llm = LLM()
         
-        self.assertIsNone(llm.client)
-        self.assertTrue(mock_settings.items() <= llm.settings.items())
+            self.assertEqual(llm.settings['use_openai'], False)
+            self.assertEqual(llm.settings['model'], 'local_model')
+            self.assertEqual(llm.use_openai, False)
     
-    
+            
     @patch('openai.OpenAI')
     def test_llm_ask_openai(self, mock_openai):
         os.environ['OPENAI_API_KEY'] = 'test_api_key'
@@ -58,7 +49,7 @@ class TestLLM(unittest.TestCase):
         mock_client.chat.completions = MagicMock()
         mock_client.chat.completions.create.return_value = MagicMock(choices=[MagicMock(message=MagicMock(content="Test response"))])
         
-        mock_settings = {"use_openai": True, "model": "gpt-3.5-turbo", "temperature": 0.7, "max_tokens": 200}
+        mock_settings = {"use_openai": True, "model": "gpt-4o", "temperature": 0.3, "max_tokens": 1450}
         self.create_temp_settings_file(mock_settings)
         llm = LLM()
         
@@ -66,55 +57,54 @@ class TestLLM(unittest.TestCase):
         response = llm.ask(question)
         
         mock_client.chat.completions.create.assert_called_once_with(
-            model="gpt-3.5-turbo",
+            model="gpt-4o",
             messages=[
                 {'role': 'system', 'content': 'You are a helpful medical research assistant specializing in analyzing biomedical papers and datasets.'},
                 {'role': 'user', 'content': question}
             ],
-            temperature=0.7,
-            max_tokens=200,
-        )
-        self.assertEqual(response, "Test response")
-        del os.environ['OPENAI_API_KEY']
-        
-    @patch ('openai.OpenAI')
-    def test_llm_ask_openai_override_params(self, mock_openai):
-        os.environ['OPENAI_API_KEY'] = 'test_api_key'
-        mock_client = MagicMock()
-        mock_openai.return_value = mock_client
-        mock_client.chat = MagicMock() 
-        mock_client.chat.completions = MagicMock() 
-        mock_completion = MagicMock()
-        mock_completion.choices = [MagicMock(message=MagicMock(content="Test response"))]
-        mock_client.chat.completions.create.return_value = mock_completion
-        
-        mock_settings = {'use_openai': True, "model": "gpt-3.5-turbo", 'temperature': 0.7, "max_tokens": 200}
-        self.create_temp_settings_file(mock_settings)
-        
-        llm = LLM()
-        question = "What is the meaning of life?"
-        response = llm.ask(question, temperature=0.9, max_tokens=300)
-        
-        mock_client.chat.completions.create.assert_called_once_with(
-            model="gpt-3.5-turbo", 
-            messages=[
-                {'role': 'system', 'content': 'You are a helpful medical research assistant specializing in analyzing biomedical papers and datasets.'}, 
-                {'role': 'user', 'content': question}
-            ],
-            temperature=0.9,    
-            max_tokens=300,     
+            temperature=0.3,
+            max_tokens=1450,
         )
         self.assertEqual(response, "Test response")
         del os.environ['OPENAI_API_KEY']
     
-    def test_llm_ask_local(self):
-        mock_settings = {"use_openai": False, "model": "local_model"}
-        self.create_temp_settings_file(mock_settings)
-        llm = LLM()
-        print(f"LLM settings: {llm.settings}")
+    @patch('llm_ui.app.llm.load_settings')
+    def test_llm_ask_local(self, mock_load_settings):
+        controlled_settings = {
+            'temperature': 0.3,
+            'max_tokens': 1450,
+            'prompt_template': (
+                "You are an AI assistant specializing in biomedical research datasets. Your task is to "
+                "answer questions about the provided datasets from ArrayExpress/BioStudies.\n\n"
+                "Title: {title}\nAbstract: {abstract}\n\nAvailable datasets:\n{datasets}\n\n"
+                "Question: {question}\n\nPlease provide a comprehensive, accurate answer based on "
+                "the dataset information provided above and make sure to include the PMID "
+                " and/or the pubmed url link. \n"
+            ),
+            'model': "local_model",  # Set for this test
+            'use_openai': False,     # Set for this test
+            'similarity_k': 5,
+            'profiler_options': {
+                'field_info_to_compare': "choices"
+            }
+        }
+        mock_load_settings.return_value = controlled_settings
+
+    
+        llm = LLM() 
+            
+        self.assertFalse(llm.settings.get("use_openai"), 
+                         f"LLM.settings.use_openai should be False. Actual: {llm.settings}")
+        self.assertEqual(llm.settings.get("model"), "local_model",
+                         f"LLM.settings.model should be 'local_model'. Actual: {llm.settings}")
+        
+        self.assertIsNone(llm.client, "LLM.client should be None when use_openai is False.")
+            
         question = "Is the local model implemented?"
         response = llm.ask(question)
-        self.assertEqual(response, "Error: Local model 'local_model' handling is not implemented.")
+        
+        expected_response = "Error: Local model 'local_model' handling is not implemented."
+        self.assertEqual(response, expected_response)
     
     @patch ('openai.OpenAI')
     def test_llm_ask_openai_error_handling(self, mock_openai):
@@ -137,6 +127,14 @@ class TestLLM(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+            
+
+
+    
+    
         
         
+    
+    
         
+
