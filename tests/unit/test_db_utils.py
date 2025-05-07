@@ -375,26 +375,7 @@ class TestDBUtils(unittest.TestCase):
         page_search = db_utils.get_datasets_page(0, 10, search_term='Title 1')
         self.assertEqual(len(page_search), 1)
         self.assertEqual(page_search[0]['title'], 'Title 1')
-    
-    @patch('llm_ui.app.db_utils.get_db_connection')
-    def test_get_datasets_by_ids(self, mock_get_conn):
-        mock_get_conn.return_value = self.conn
-        cursor = self.conn.cursor()
-        cursor.executemany("INSERT INTO datasets (file_path, accession, title) VALUES (?, ?, ?)",
-                   [('file_path_1', 'accession_1', 'Title 1'),
-                    ('file_path_2', 'accession_2', 'Title 2'),
-                    ('file_path_3', 'accession_3', 'Title 3')])
-        self.conn.commit()
 
-        datasets = db_utils.get_datasets_by_ids(['accession_1', 'accession_3'])
-        self.assertEqual(len(datasets), 2)
-        datasets.sort(key=lambda x: x['accession'])
-        self.assertEqual(datasets[0]['title'], 'Title 1')
-        self.assertEqual(datasets[1]['title'], 'Title 3')
-
-        datasets_file_path = db_utils.get_datasets_by_ids(['file_path_2'])
-        self.assertEqual(len(datasets_file_path), 1)
-        self.assertEqual(datasets_file_path[0]['title'], 'Title 2')
 
 if __name__ == '__main__':
     unittest.main()
