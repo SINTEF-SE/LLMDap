@@ -47,7 +47,7 @@ def show():
             with st.spinner("Scanning directories and updating database... This may take time."):
                 # Define directories to scan - ensure USER_DATASETS_DIR exists
                 os.makedirs(db_utils.USER_DATASETS_DIR, exist_ok=True)
-                # --- IMPORTANT: Add paths to your actual data here ---
+                
                 scan_directories = [
                     # Common paths based on project structure - ADJUST AS NEEDED
                     os.path.join(project_root, 'data'), # For bulk files like arxpr_simplified.json
@@ -135,7 +135,7 @@ def show():
             st.session_state.current_dataset_page = total_pages - 1
             st.rerun()
 
-    # --- NEW: Select/Deselect All Buttons for Current Page ---
+    # Select/Deselect All Buttons for Current Page ---
     if datasets_on_page: # Only show if there are datasets on the page
         select_cols = st.columns(2)
         with select_cols[0]:

@@ -616,7 +616,7 @@ def extract_dataset_metadata(dataset):
                  # Use a more explicit header for the Publication Info if needed
                  details_list.append("\n**Publication Info (from PubMed):**") # Optional header
                  for item in pubmed_context:
-                      # --- START CHANGE ---
+                      
                       if item.startswith("Abstract:"):
                            # Use a more distinct label for the abstract
                            abstract_text = item.replace("Abstract:", "").strip()
@@ -624,7 +624,7 @@ def extract_dataset_metadata(dataset):
                       elif item.startswith("MeSH Terms:") or item.startswith("Article Title:") or item.startswith("Journal:"):
                           # Add other key PubMed info, removing helper's header
                           details_list.append(item.replace('\n### Publication Information (from PubMed):','').strip())
-                      # --- END CHANGE ---
+                      
                  pub_details_added = True
 
             if not pub_details_added:
@@ -862,7 +862,7 @@ def show():
         if not st.session_state.chat_history:
             st.markdown("<div style='text-align: center; color: #888; padding: 20px;'>Ask a question about the selected datasets to get started</div>", unsafe_allow_html=True)
         else:
-            for i, (time_stamp, question_text, answer_text) in enumerate(st.session_state.chat_history):
+            for i, ( question_text, answer_text) in enumerate(st.session_state.chat_history):
                 # User message
                 st.markdown(f"""
                 <div class='message-container' style='align-items: flex-end; margin-bottom: 15px;'>

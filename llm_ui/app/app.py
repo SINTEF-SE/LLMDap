@@ -27,7 +27,7 @@ st.markdown("""
 print(f"Current directory: {os.getcwd()}")
 print(f"Pages directory content: {os.listdir(os.path.join(os.path.dirname(__file__), 'pages'))}")
 
-# Use consistent imports for all pages
+# using consistent imports for all pages
 from llm_ui.app.pages import home, configure, profiler, provider, datasets, consumer_QA
 
 def main():
