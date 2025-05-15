@@ -862,7 +862,7 @@ def show():
         if not st.session_state.chat_history:
             st.markdown("<div style='text-align: center; color: #888; padding: 20px;'>Ask a question about the selected datasets to get started</div>", unsafe_allow_html=True)
         else:
-            for i, ( question_text, answer_text) in enumerate(st.session_state.chat_history):
+            for i, (timestamp, question_text, answer_text) in enumerate(st.session_state.chat_history):
                 # User message
                 st.markdown(f"""
                 <div class='message-container' style='align-items: flex-end; margin-bottom: 15px;'>

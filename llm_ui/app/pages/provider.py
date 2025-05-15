@@ -1080,12 +1080,12 @@ def show():
                                     # Optional: Log keys from profiler output that don't match DB columns
                                     print(f"[Provider Save] Warning: Profiler key '{key}' (base: '{base_key}') not found in db_data map.")
 
-                            # --- Log final values before saving ---
-                            st.info(f"Debug (Save): Final Organism for DB: {db_data.get('organism')}")
+                            # --- Log final values before saving, mostly for debugging ---
+                            # st.info(f"Debug (Save): Final Organism for DB: {db_data.get('organism')}")
                             # Add log for organism_part
-                            st.info(f"Debug (Save): Final Organism Part for DB: {db_data.get('organism_part')}")
-                            st.info(f"Debug (Save): Final Study Type for DB: {db_data.get('study_type')}")
-                            st.info(f"Debug (Save): Final Hardware for DB: {db_data.get('hardware')}")
+                            # st.info(f"Debug (Save): Final Organism Part for DB: {db_data.get('organism_part')}")
+                            # st.info(f"Debug (Save): Final Study Type for DB: {db_data.get('study_type')}")
+                            # st.info(f"Debug (Save): Final Hardware for DB: {db_data.get('hardware')}")
 
                             # --- Save JSON and Update DB ---
                             user_datasets_dir = os.path.join(project_root, 'llm_ui', 'app', 'user_datasets')
