@@ -25,7 +25,7 @@ def show():
 
     st.subheader("Navigate to:")
 
-    # Define page names as they appear in app.py's 'pages' dictionary
+    # Define page names
     page_map = {
         "Manage Datasets": "Dataset Browser",
         "Consumer QA": "Consumer Q&A",

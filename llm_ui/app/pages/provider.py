@@ -20,7 +20,7 @@ sys.path.append(profiler_dir)
 data_dir = os.path.join(project_root, 'data')
 sys.path.append(data_dir)
 
-# --- Attempt Imports with Error Handling ---
+# Attempt Imports with Error Handling 
 # This function will import dependencies and handle errors
 def import_dependencies():
     dependencies = {
@@ -102,7 +102,7 @@ def _try_extract_pmid(file_path: str) -> Optional[str]:
             # Proceed to read content below
         except Exception as xml_err:
             print(f"[_try_extract_pmid] Error processing XML {os.path.basename(file_path)}: {xml_err}. Will check content via regex.")
-            # Proceed to read content below
+            
 
     # 2. Read content (if not found via XML tags or if not XML) for regex check
     # Avoid reading again if XML parsing failed but reading succeeded below
@@ -121,7 +121,7 @@ def _try_extract_pmid(file_path: str) -> Optional[str]:
     regex_found_pmid = False
     if file_processed_for_content and content:
         # Regex for PMID: optional space/colon/hyphen, 7-9 digits, word boundaries, case-insensitive
-        # Added flexibility for variations like "PubMed ID:"
+        # Added flexibility for variations like PubMed ID
         match = re.search(r'\b(?:PMID|PubMed\s*ID)\s*[:\-]?\s*(\d{7,9})\b', content, re.IGNORECASE)
         if match and match.group(1):
             pmid = match.group(1)
@@ -505,12 +505,12 @@ def get_pmid_from_doi(doi: str) -> Optional[str]:
         st.error(f"Unexpected error searching for DOI {doi}: {e}")
         return None
 
-# --- Streamlit App ---
+# Streamlit App 
 
 def show():
     st.title("📄 Paper Processing and Analysis")
 
-    # Load dependencies and display errors (Moved here)
+    # Load dependencies and display errors 
     deps, errors = import_dependencies()
     call_inference = deps["call_inference"]
     save_xml = deps["save_xml"]
@@ -543,7 +543,7 @@ def show():
         if key not in st.session_state:
             st.session_state[key] = default_value
 
-    # --- Input Section ---
+    # Input Section 
     with st.container(border=True):
         st.subheader("1. Provide Input Paper")
         input_method = st.radio("Select Input Method:", ("Upload File", "Enter URL or PubMed ID"),
@@ -565,14 +565,14 @@ def show():
                      # Clear results on new input
                      st.session_state.processed_data = None; st.session_state.edited_json = None; st.session_state.error_message = None
 
-                     # --- Attempt to extract PMID from filename ---
+                     #  Attempt to extract PMID from filename 
                      filename_match = re.match(r'^(\d{7,9})___', uploaded_file.name)
                      pmid_from_filename = filename_match.group(1) if filename_match else None
                      if pmid_from_filename:
                           st.session_state.source_info['pmid_candidate'] = pmid_from_filename
                           print(f"[Provider] Found potential PMID {pmid_from_filename} from filename.")
-                          st.info(f"Debug: PMID from filename: {pmid_from_filename}") # DEBUG
-                     # We will attempt content extraction later, after saving the file
+                          # st.info(f"Debug: PMID from filename: {pmid_from_filename}") # DEBUG
+                     
         else:
             input_url_or_id_value = st.text_input("Enter XML URL or PubMed ID", key="url_input")
             if input_url_or_id_value:
@@ -586,7 +586,7 @@ def show():
                       # Clear results on new input
                       st.session_state.processed_data = None; st.session_state.edited_json = None; st.session_state.error_message = None
 
-                      # --- Determine input type: PMID, DOI, or URL ---
+                      #  Determine input type: PMID, DOI, or URL
                       input_value = input_url_or_id_value.strip()
                       if is_pubmed_id(input_value):
                            st.session_state.source_info['pmid_candidate'] = input_value
@@ -606,7 +606,7 @@ def show():
                       elif input_value.lower().startswith("http"):
                            st.session_state.source_info['input_type'] = 'url'
                            print(f"[Provider] Input is URL: {input_value}.")
-                           # --- Attempt to extract DOI from URL and convert to PMID ---
+                           # Attempt to extract DOI from URL and convert to PMID 
                            doi_match = re.search(r'(10\.\d{4,9}/[-._;()/:A-Z0-9]+)', input_value, re.IGNORECASE)
                            if doi_match:
                                 extracted_doi = doi_match.group(1)
@@ -621,7 +621,7 @@ def show():
                                      print(f"[Provider] Failed to convert extracted DOI {extracted_doi} from URL.")
                            else:
                                 print("[Provider] No DOI found in URL.")
-                           # --- End DOI extraction from URL ---
+                           # End DOI extraction from URL
                       else:
                            st.session_state.source_info['input_type'] = 'unknown'
                            st.error("Input not recognized as PMID, DOI, or URL.")
@@ -629,7 +629,7 @@ def show():
 
                  input_url_or_id = input_url_or_id_value # Keep original input for display/processing
 
-    # --- Schema Selection ---
+    # Schema Selection 
     with st.container(border=True):
         st.subheader("2. Select Schema")
         st.session_state.schema_choice = st.radio(
@@ -690,7 +690,7 @@ def show():
                 st.error("Default schema could not be loaded. Processing is disabled.")
                 schema_load_error = True
 
-    # --- Processing Section ---
+    # Processing Section 
     with st.container(border=True):
         st.subheader("3. Process Paper")
 
@@ -723,7 +723,7 @@ def show():
 
             with st.spinner("Processing... This may take a while."):
                 try:
-                    # --- Handle Input (Save/Extract to Temp Dir) ---
+                    # Handle Input (Save/Extract to Temp Dir) 
                     current_source_info = st.session_state.get('source_info', {})
                     temp_input_path = None # Path to the initial file in temp dir
 
@@ -731,14 +731,14 @@ def show():
                         temp_input_path = os.path.join(temp_dir, uploaded_file.name)
                         with open(temp_input_path, "wb") as f: f.write(uploaded_file.getbuffer())
                         st.info(f"Using uploaded file: {uploaded_file.name}")
-                        # --- Try extracting PMID from content (after saving) ---
+                        # Try extracting PMID from content (after saving) 
                         pmid_from_content = _try_extract_pmid(temp_input_path)
                         if pmid_from_content:
                               # Prioritize content over filename
                               st.session_state.source_info['pmid_candidate'] = pmid_from_content
                               print(f"[Provider] Found potential PMID {pmid_from_content} from file content.")
                               st.info(f"Debug: PMID from content (upload): {pmid_from_content}") # DEBUG
-                         # ----------------------------------------------------
+                         # 
 
                         if uploaded_file.name.lower().endswith(".pdf"):
                             extracted_text_path = extract_text_from_file(temp_input_path, temp_dir, partition_func) # Pass partition_func
@@ -746,14 +746,14 @@ def show():
                                 with open(extracted_text_path, "r", encoding="utf-8") as f:
                                     extracted_text_content = f.read()
                                 input_path_for_pipeline = None # Don't pass path for extracted text
-                                # --- Try extracting PMID from extracted PDF text ---
+                                #  Try extracting PMID from extracted PDF text 
                                 pmid_from_pdf_text = _try_extract_pmid(extracted_text_path)
                                 if pmid_from_pdf_text:
                                      # Prioritize content over filename
                                      st.session_state.source_info['pmid_candidate'] = pmid_from_pdf_text
                                      print(f"[Provider] Found potential PMID {pmid_from_pdf_text} from extracted PDF text.")
                                      st.info(f"Debug: PMID from PDF text: {pmid_from_pdf_text}") # DEBUG
-                                 # --------------------------------------------------
+                                 
                             else:
                                  st.session_state.error_message = "Failed to extract text from PDF."
                         else: # Assume XML
@@ -781,7 +781,7 @@ def show():
                                     # Examine the XML content
                                     try:
                                         with open(temp_input_path, "r", encoding="utf-8", errors="ignore") as f:
-                                            xml_content = f.read(1000)  # Read first 1000 chars
+                                            xml_content = f.read(1500)  # Read first 1000 chars
                                             st.info(f"XML content preview (first 200 chars): {xml_content[:200].replace(chr(10), ' ')}")
                                             if len(xml_content) < 50:
                                                 st.warning(f"WARNING: XML content is very short ({len(xml_content)} chars)")
@@ -849,16 +849,16 @@ def show():
                         elif input_type == 'url':
                             temp_input_path = fetch_xml_from_url(value, temp_dir)
                             if temp_input_path and os.path.exists(temp_input_path):
-                                # --- Try extracting PMID from fetched URL content ---
+                                #  Try extracting PMID from fetched URL content
                                 if not pmid_candidate: # Only extract if we don't already have one from DOI conversion etc.
                                      pmid_from_content = _try_extract_pmid(temp_input_path)
                                      if pmid_from_content:
                                           st.session_state.source_info['pmid_candidate'] = pmid_from_content
                                           print(f"[Provider] Found potential PMID {pmid_from_content} from URL content.")
                                           st.info(f"Debug: PMID from URL content: {pmid_from_content}") # DEBUG
-                                 # ----------------------------------------------------
+                                 # 
 
-                                # --- Always attempt text extraction for URL downloads ---
+                                # Always attempt text extraction for URL downloads
                                 st.info("Attempting to extract text content from downloaded URL file...")
                                 extracted_text_path = extract_text_from_file(temp_input_path, temp_dir, partition_func)
                                 if extracted_text_path and os.path.exists(extracted_text_path):
@@ -866,7 +866,7 @@ def show():
                                           extracted_text_content = f.read()
                                      input_path_for_pipeline = None # Use text content, not path
                                      st.info("Using extracted text content for pipeline.")
-                                     # Optionally re-run PMID extraction on the cleaner text ONLY if not already found via URL's DOI
+                                     # Optionally re-run PMID extraction on the cleaner text ONLY if not already found via URLs DOI
                                      if not st.session_state.source_info.get('pmid_candidate'):
                                           st.info("Attempting PMID extraction from extracted URL text...")
                                           pmid_from_extracted_text = _try_extract_pmid(extracted_text_path)
@@ -889,11 +889,11 @@ def show():
                          st.error("No valid input source detected.")
                          st.session_state.error_message = "No input provided."
 
-                    # --- Run Pipeline ---
+                    # Run Pipeline 
                      # Check if we have either a valid path OR extracted text content AND no prior error
-                    st.info("Checking conditions before running pipeline...") # ADDED LOGGING
+                    st.info("Checking conditions before running pipeline...") #  LOGGING
                     if not st.session_state.error_message and ((input_path_for_pipeline and os.path.exists(input_path_for_pipeline)) or extracted_text_content):
-                         st.info(f"Schema to run: {schema_to_run.__name__ if schema_to_run else 'None'}") # ADDED LOGGING
+                         st.info(f"Schema to run: {schema_to_run.__name__ if schema_to_run else 'None'}") # LOGGING
                          if schema_to_run:
                              st.info(f"Debug: PMID candidate before pipeline: {st.session_state.get('source_info', {}).get('pmid_candidate')}") # DEBUG
                              if call_inference:
@@ -928,9 +928,9 @@ def show():
 
                                 # Only run if no internal error
                                 if "error_message" not in st.session_state or st.session_state.error_message is None:
-                                    st.info("Calling inference pipeline...") # ADDED LOGGING
+                                    st.info("Calling inference pipeline...") # LOGGING
                                     output = call_inference(**inference_args)
-                                    st.info("Inference pipeline finished.") # ADDED LOGGING
+                                    st.info("Inference pipeline finished.") # LOGGING
 
                                     # [Output handling remains similar]
                                     if output:
@@ -957,7 +957,7 @@ def show():
                                 st.session_state.error_message = "Processing function unavailable."
                     elif not st.session_state.error_message: # If no specific error yet
                             if not schema_to_run: st.session_state.error_message = "Schema unavailable."
-                             # The condition below is now covered by the outer 'if'
+                             # The condition below is now covered by the outer if statement
                              # elif not input_path_for_pipeline or not os.path.exists(input_path_for_pipeline): st.session_state.error_message = "Input file path invalid or missing after processing."
 
                 except Exception as e:
@@ -966,10 +966,10 @@ def show():
                     st.error(traceback.format_exc())
                     st.session_state.error_message = str(e)
 
-    # --- Output Display and Editing ---
+    # Output Display and Editing 
     with st.container(border=True):
         st.subheader("4. Review and Edit Results")
-        # [Display logic remains similar]
+        # Display logic remains similar
         if st.session_state.processed_data and st.session_state.edited_json is not None:
             st.info("Review the extracted data below. You can edit the JSON directly before saving or chatting.")
             edited_json_state = st.text_area(
@@ -983,10 +983,10 @@ def show():
         else:
             st.info("Process a paper using the button above to see results here.")
 
-    # --- Actions Section ---
+    # Actions Section
     with st.container(border=True):
         st.subheader("5. Actions")
-        # [Actions logic remains similar]
+        # Actions logic remains similar
         if st.session_state.processed_data and st.session_state.edited_json is not None:
             # Add input for custom dataset name
             custom_dataset_name = st.text_input(
@@ -1004,8 +1004,8 @@ def show():
                             # Get the full structure potentially edited from the text area
                             edited_data_full = json.loads(st.session_state.edited_json)
 
-                            # --- Access the NESTED filled_form dictionary ---
-                            # Assuming the outer key is usually '0', or fallback to the first key's value
+                            #  Access the NESTED filled_form dictionary 
+                            # Assuming the outer key is usually 0, or fallback to the first key's value
                             first_key = next(iter(edited_data_full), None)
                             if first_key:
                                 inner_data = edited_data_full.get(first_key, {})
@@ -1016,18 +1016,18 @@ def show():
                             if not form_fields:
                                 st.error("Could not find 'filled_form' data within the processed JSON. Cannot save.")
                                 raise ValueError("Missing 'filled_form' in processed data")
-                            # --------------------------------------------------
+                            
 
                             source_info = st.session_state.get('source_info', {})
 
-                            # --- Extract Key Identifiers ---
+                            # Extract Key Identifiers 
                             pmid_candidate = source_info.get('pmid_candidate')
                             # Check if pmid is directly in form_fields (less likely but possible)
                             pmid_from_form = form_fields.get('pmid') or form_fields.get('PMID')
                             pmid = pmid_candidate or pmid_from_form
                             if not pmid or str(pmid).lower() == 'unknown': pmid = 'NO_PMID'
 
-                            # --- Fetch Metadata from PubMed (useful for Title fallback) ---
+                            #  Fetch Metadata from PubMed (useful for Title fallback)
                             pubmed_metadata = None
                             if pmid != 'NO_PMID':
                                 pubmed_metadata = fetch_pubmed_metadata(pmid)
@@ -1046,7 +1046,7 @@ def show():
                                     (pubmed_metadata.get('title') if pubmed_metadata else None) or \
                                     source_info.get('name', f"Dataset {accession}")
 
-                            # --- Prepare Data for Database - Prioritize Profiler Output ---
+                            #  Prepare Data for Database - Prioritize Profiler Output 
                             db_data = {
                                 'title': title,
                                 'accession': accession,
@@ -1062,16 +1062,16 @@ def show():
                                 'experimental_designs': None,
                                 'assay_by_molecule': None,
                                 'technology': None,
-                                # Add any other columns your DB table expects here
+                                
                             }
 
-                            # --- Map profiler output (form_fields) to db_data keys ---
+                            #  Map profiler output (form_fields) to db_data keys 
                             # (The loop below this should now work correctly for organism_part)
                             for key, value in form_fields.items():
                                 # Remove the trailing '_number' if it exists to get the base field name
                                 base_key = re.sub(r'_\d+$', '', key)
 
-                                # If this base_key matches a column name in our db_data, update it
+                                # If this base_key matches a column name in db_data, update it
                                 if base_key in db_data:
                                     # Prioritize the value from the profiler (form_fields)
                                     if value is not None and value != "":
@@ -1094,7 +1094,7 @@ def show():
                             save_path = os.path.join(user_datasets_dir, safe_filename)
 
                             # Save the original *full* profiler output structure
-                            # (or just form_fields if you prefer, but saving full structure might be useful)
+                        
                             with open(save_path, "w") as f:
                                 json.dump(edited_data_full, f, indent=4) # Save the full structure
                             st.info(f"Saved full profiler output JSON to: {save_path}")
@@ -1112,7 +1112,7 @@ def show():
             with col2:
                 chat_button = st.button("💬 Chat with LLM", key="chat_llm", use_container_width=True)
                 if chat_button:
-                     # [Chat preparation logic remains similar]
+                     #Chat preparation logic remains similar
                     try:
                         st.session_state.chat_context = {
                             "processed_data": json.loads(st.session_state.edited_json),
@@ -1126,7 +1126,7 @@ def show():
         else:
             st.info("Process a paper to enable actions.")
 
-    # --- Footer ---
+    #  Footer 
     st.markdown("---")
     st.caption("Provider Page - Alpha Version")
 

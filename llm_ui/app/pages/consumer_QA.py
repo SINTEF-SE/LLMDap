@@ -125,7 +125,7 @@ def _fetch_pubmed_context(pmid: str) -> List[str]:
     return metadata
 
 
-# Inside consumer_QA.py
+
 
 def _fetch_arrayexpress_context(accession: str) -> List[str]:
     """Fetches details from BioStudies/ArrayExpress APIs, targeting specific fields."""
@@ -135,7 +135,7 @@ def _fetch_arrayexpress_context(accession: str) -> List[str]:
     metadata = []
     found_details = set() # Keep track of details found to avoid redundancy
 
-    # --- Try BioStudies API ---
+    # Try BioStudies API 
     try:
         ae_url = f"https://www.ebi.ac.uk/biostudies/api/v1/studies/{accession}"
         print(f"DEBUG: Requesting BioStudies API: {ae_url}")
@@ -164,10 +164,10 @@ def _fetch_arrayexpress_context(accession: str) -> List[str]:
                     elif 'assay' in name or 'measurement' in name and 'assay' not in found_details:
                          metadata.append(f"Assay Type: {value}")
                          found_details.add('assay')
-                    # Add other less critical but potentially useful attributes
+                    #  other less critical but potentially useful attributes
                     elif name not in ['title', 'description', 'name', 'release_date', 'accno', 'organism']: # Avoid redundancy
                          if len(value) > 100: value = value[:100] + "..."
-                         metadata.append(f"- {name_cap}: {value}") # Add other attributes with filtering
+                         metadata.append(f"- {name_cap}: {value}") # other attributes with filtering
 
         else:
              metadata.append("- No attributes found in BioStudies study section.")
@@ -180,7 +180,7 @@ def _fetch_arrayexpress_context(accession: str) -> List[str]:
     except Exception as e: metadata.append(f"- AE/BioStudies Info: Unexpected error - {type(e).__name__}: {e}")
 
 
-    # --- Try AE Legacy API ---
+    # Try AE Legacy API 
     try:
         legacy_url = f"https://www.ebi.ac.uk/arrayexpress/json/v3/experiments/{accession}"
         print(f"DEBUG: Requesting AE Legacy API: {legacy_url}")
@@ -251,7 +251,7 @@ def _fetch_arrayexpress_context(accession: str) -> List[str]:
         pass
 
 
-    # --- Try to fetch IDF/SDRF snippets ---
+    # Try to fetch IDF/SDRF snippets 
     base_file_url = f"https://www.ebi.ac.uk/arrayexpress/files/{accession}"
 
     # Fetch IDF snippet
@@ -276,7 +276,7 @@ def _fetch_arrayexpress_context(accession: str) -> List[str]:
         if sdrf_response.status_code == 200:
             sdrf_content = sdrf_response.text
             metadata.append(f"\n### SDRF Snippet (Sample Details):")
-            lines = sdrf_content.strip().split('\n')[:10] # First 10 lines
+            lines = sdrf_content.strip().split('\n')[:15] # First 15 lines
             # Truncate long lines within the snippet
             truncated_lines = [(line[:200] + '...' if len(line) > 200 else line) for line in lines]
             metadata.extend(truncated_lines)
@@ -335,206 +335,9 @@ def _fetch_europepmc_context(pmid: str) -> List[str]:
     except Exception as e:
         metadata.append(f"- ArrayExpress Info: Unexpected error during fetch - {type(e).__name__}: {e}")
 
-    # Add a small delay
+    # Adding a small delay
     time.sleep(0.5)
     return metadata
-
-
-def find_dataset_files(data_dir=None):
-    """Find all ArrayExpress dataset files in the data directory"""
-    if not data_dir:
-        # Try with the default location first
-        default_dirs = [
-            "/mnt/data/upcast/data/arxpr",  # Original data location
-            os.path.join(project_root, "data", "arxpr"),  # Local data directory
-            os.path.join(project_root, "data")  # Fallback
-        ]
-        
-        for dir_path in default_dirs:
-            if os.path.exists(dir_path):
-                print(f"Found data directory: {dir_path}")
-                data_dir = dir_path
-                break
-    
-    if not data_dir or not os.path.exists(data_dir):
-        print("No data directory found")
-        return []
-    
-    # Look for JSON files with the ArrayExpress pattern (PMID___E-XXXX-NNNN.json)
-    dataset_files = glob.glob(os.path.join(data_dir, "*.json"))
-    print(f"Found {len(dataset_files)} JSON files in {data_dir}")
-    
-    if len(dataset_files) > 0:
-        print(f"Example files: {dataset_files[:3]}")
-    
-    return dataset_files
-
-def load_dataset_sample(dataset_files, max_samples=10):
-    """Load a sample of datasets from the files"""
-    if not dataset_files:
-        return []
-    
-    # If there are too many files, sample a subset
-    if len(dataset_files) > max_samples:
-        sample_files = random.sample(dataset_files, max_samples)
-    else:
-        sample_files = dataset_files
-        
-    datasets = []
-    for file_path in sample_files:
-        try:
-            # Read the file content
-            with open(file_path, 'r') as f:
-                content = f.read()
-                
-            # Try to parse as JSON
-            try:
-                data = json.loads(content)
-            except json.JSONDecodeError:
-                st.warning(f"Couldn't parse JSON from {file_path}")
-                continue
-            
-            # If data is a string, something went wrong
-            if isinstance(data, str):
-                st.warning(f"File content is a string, not a JSON object: {file_path}")
-                # Try to parse it again in case it's double-encoded
-                try:
-                    data = json.loads(data)
-                except json.JSONDecodeError:
-                    continue  # Skip this file
-                
-            # Extract the basename without extension
-            basename = os.path.basename(file_path)
-            try:
-                pmid, accession = basename.split("___")
-                accession = accession.replace(".json", "")
-            except ValueError:
-                # Handle files with unexpected naming format
-                pmid = "unknown"
-                accession = basename.replace(".json", "")
-            
-            # Extract useful metadata
-            title = ""
-            description = ""
-            organism = ""
-            study_type = ""
-            release_date = ""
-            experimental_factors = ""
-            technology = ""
-            
-            # Navigate through the ArrayExpress JSON structure
-            if isinstance(data, dict):
-                # Try different ways to get the title
-                if 'submissions' in data and isinstance(data['submissions'], list) and len(data['submissions']) > 0:
-                    title = data['submissions'][0].get('title', '')
-                
-                # Extract study info
-                if 'section' in data and isinstance(data['section'], list):
-                    sections = data['section']
-                    for section in sections:
-                        if isinstance(section, dict) and section.get('type') == 'study':
-                            attributes = section.get('attributes', [])
-                            for attr in attributes:
-                                if isinstance(attr, dict):
-                                    if attr.get('name') == 'description':
-                                        description = attr.get('value', '')
-                                    elif attr.get('name') == 'organism':
-                                        organism = attr.get('value', '')
-                                    elif attr.get('name') == 'study type':
-                                        study_type = attr.get('value', '')
-                                    elif attr.get('name') == 'release date':
-                                        release_date = attr.get('value', '')
-                        
-                        # Look for experimental factors in subsections
-                        if isinstance(section, dict) and 'subsections' in section:
-                            for subsection in section['subsections']:
-                                if isinstance(subsection, dict) and subsection.get('type') == 'samples':
-                                    for attr in subsection.get('attributes', []):
-                                        if isinstance(attr, dict) and attr.get('name') == 'experimental factors':
-                                            experimental_factors = attr.get('value', '')
-                                        
-                                if isinstance(subsection, dict) and subsection.get('type') == 'protocols':
-                                    for subsubsection in subsection.get('subsections', []):
-                                        if isinstance(subsubsection, dict) and 'attributes' in subsubsection:
-                                            for attr in subsubsection['attributes']:
-                                                if attr.get('name') == 'hardware' or attr.get('name') == 'technology':
-                                                    technology = attr.get('value', '')
-            
-            # If we don't have a good title, try to fetch it from PubMed
-            if not title or title.strip() == "" or title.startswith("Dataset E-"):
-                try:
-                    if pmid and pmid != "unknown":
-                        import requests
-                        from xml.etree import ElementTree as ET
-                        
-                        pubmed_url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id={pmid}&retmode=xml"
-                        
-                        response = requests.get(pubmed_url, timeout=5)
-                        if response.status_code == 200:
-                            root = ET.fromstring(response.text)
-                            
-                            # Extract article title from PubMed
-                            article_title = root.find(".//ArticleTitle")
-                            if article_title is not None and article_title.text:
-                                title = article_title.text
-                except Exception as e:
-                    # If PubMed lookup fails, use accession as title
-                    if not title:
-                        title = f"Dataset {accession}"
-            
-            # Create a dataset object with improved title
-            dataset = {
-                "title": title or f"Dataset {accession}",
-                "accession": accession,
-                "pmid": pmid,
-                "url": f"https://www.ebi.ac.uk/biostudies/arrayexpress/studies/{accession}",
-                "file_path": file_path,
-                "description": description,
-                "organism": organism,
-                "study_type": study_type,
-                "release_date": release_date,
-                "experimental_factors": experimental_factors,
-                "technology": technology
-            }
-            
-            datasets.append(dataset)
-            
-        except Exception as e:
-            st.warning(f"Error loading dataset from {file_path}: {str(e)}")
-            continue
-    
-    return datasets
-
-def load_cached_datasets():
-    """Load cached datasets from file if available."""
-    try:
-        with open("cached_datasets.json", "r") as f:
-            content = f.read().strip()
-            if not content or content == "[]" or content == "{}":
-                print("Cached datasets file is empty")
-                return None
-                
-            datasets = json.loads(content)
-            if not datasets or not isinstance(datasets, list) or len(datasets) == 0:
-                print("No valid datasets in cache")
-                return None
-                
-            print(f"Loaded {len(datasets)} cached datasets")
-            return datasets
-    except (FileNotFoundError, json.JSONDecodeError) as e:
-        print(f"Error loading cached datasets: {e}")
-        return None
-
-def save_cached_datasets(datasets):
-    """Save datasets to cache file for future use."""
-    try:
-        with open("cached_datasets.json", "w") as f:
-            json.dump(datasets, f)
-        print(f"Saved {len(datasets)} datasets to cache")
-        return True
-    except Exception as e:
-        print(f"Error saving datasets to cache: {e}")
-        return False
 
 def load_settings():
     """Load settings from settings.json or use defaults."""
@@ -570,7 +373,7 @@ def extract_dataset_metadata(dataset):
     pmid = dataset.get('pmid')
     accession = dataset.get('accession')
 
-    # --- Group 1: Overview ---
+    #  Group 1: Overview 
     metadata_groups['overview'].append(f"### Dataset Overview: {dataset.get('title', 'N/A')} (Accession: {accession if accession else 'N/A'})")
     metadata_groups['overview'].append(f"- Source Type: {source}")
     metadata_groups['overview'].append(f"- Provided PMID: {pmid if pmid else 'N/A'}")
@@ -579,7 +382,7 @@ def extract_dataset_metadata(dataset):
     if dataset.get('study_type'): metadata_groups['overview'].append(f"- Study Type: {dataset.get('study_type')}")
 
 
-    # --- Group 2: Combined Details (Local DB + Publication via PMID) ---
+    #  Group 2: Combined Details (Local DB + Publication via PMID) 
     details_list = [] # Temporary list for this group
 
     # Add Local DB fields first 
@@ -595,14 +398,14 @@ def extract_dataset_metadata(dataset):
              found_local = True
     if not found_local and source == 'user_provider': # Only show for user if nothing else found
         details_list.append("- No additional specific local metadata details found.")
-    # Assign collected details to the group (might be empty for non-user in TEST)
+    # Assign collected details to the group 
     metadata_groups['local_details'] = details_list
 
 
     # Fetch and add Publication details if valid PMID exists
     valid_pmid = pmid and pmid != 'NO_PMID' and str(pmid).strip().isdigit()
-    print(f"DEBUG consumer_QA: Processing Accession: {accession}, Source: {source}") # Keep debugs
-    print(f"DEBUG consumer_QA: Raw PMID value from dataset dict: '{pmid}' (Type: {type(pmid)})")
+    #print(f"DEBUG consumer_QA: Processing Accession: {accession}, Source: {source}") 
+    #print(f"DEBUG consumer_QA: Raw PMID value from dataset dict: '{pmid}' (Type: {type(pmid)})")
     print(f"DEBUG consumer_QA: PMID '{pmid}' validity check result: {valid_pmid}")
 
     if valid_pmid:
@@ -613,16 +416,16 @@ def extract_dataset_metadata(dataset):
 
             pub_details_added = False
             if len(pubmed_context) > 1 or (len(pubmed_context) == 1 and "Error" not in pubmed_context[0]):
-                 # Use a more explicit header for the Publication Info if needed
+                 
                  details_list.append("\n**Publication Info (from PubMed):**") # Optional header
                  for item in pubmed_context:
                       
                       if item.startswith("Abstract:"):
-                           # Use a more distinct label for the abstract
+                           # a more distinct label for the abstract
                            abstract_text = item.replace("Abstract:", "").strip()
                            details_list.append(f"**Fetched Publication Abstract:** {abstract_text}") # New Label
                       elif item.startswith("MeSH Terms:") or item.startswith("Article Title:") or item.startswith("Journal:"):
-                          # Add other key PubMed info, removing helper's header
+                          # other key PubMed info, removing helper's header
                           details_list.append(item.replace('\n### Publication Information (from PubMed):','').strip())
                       
                  pub_details_added = True
@@ -636,10 +439,10 @@ def extract_dataset_metadata(dataset):
          metadata_groups['publication'].append("- Publication Info: No valid PMID provided.")
 
 
-    # --- Group 3: User Specific Data (Profiler JSON, Full Text) ---
+    # Group 3: User Specific Data (Profiler JSON, Full Text) 
     # This block only runs for user_provider source
     if source == 'user_provider':
-        # --- MODIFIED: Read JSON and extract context snippets ---
+        #  Read JSON and extract context snippets 
         user_file_path = dataset.get('file_path')
         if user_file_path and os.path.exists(user_file_path):
             try:
@@ -676,10 +479,10 @@ def extract_dataset_metadata(dataset):
                 metadata_groups['user_specific'].append(f"- Error reading user data file {os.path.basename(user_file_path)}: {e}")
         else:
             metadata_groups['user_specific'].append("- Associated user JSON file not found or path missing.")
-        # --- END MODIFICATION ---
+        
 
 
-    # --- Group 4: ArrayExpress API Details (if applicable) ---
+    #  Group 4: ArrayExpress API Details (if applicable) 
     # (Will be skipped for non-user in TEST below)
     is_arrayexpress_source = source in ['arrayexpress', 'bulk_processed']
     looks_like_ae_acc = accession and re.match(r"E-\w{4}-\d+", accession)
@@ -692,20 +495,20 @@ def extract_dataset_metadata(dataset):
                  metadata_groups['api_details'].append("- Could not retrieve significant details from ArrayExpress APIs.")
 
 
-    # --- Assemble Final Context String ---
+    # Assemble Final Context String 
     final_metadata = []
     # Always add overview
     if metadata_groups['overview']:
         final_metadata.extend(metadata_groups['overview'])
 
-        # --- Assemble Final Context String (Original Assembly Logic) ---
+        # Assemble Final Context String (Original Assembly Logic) 
     final_metadata = []
     if metadata_groups['overview']:
         final_metadata.extend(metadata_groups['overview'])
     if metadata_groups['publication']: # Combined local + publication
         final_metadata.append("\n### Publication & Local Details") # Combine headers
         final_metadata.extend(metadata_groups['publication'])
-    # Add local details only if not already covered by publication group (less likely now)
+    # Add local details only if not already covered by publication group
     if metadata_groups['local_details']:
          final_metadata.append("\n### Locally Stored Details")
          final_metadata.extend(metadata_groups['local_details'])
@@ -718,7 +521,7 @@ def extract_dataset_metadata(dataset):
     
 
 
-    # --- FINAL DEBUG ---
+    # DEBUG 
     print(f"\nDEBUG consumer_QA: FINAL metadata list for Accession {accession} BEFORE JOIN (REVISED LOGIC ACTIVE):")
     # Print each group that will be included for debugging
     if metadata_groups['overview']: print("  - Overview Included")
@@ -850,11 +653,11 @@ def show():
         st.markdown(f"<span class='datasets-badge'>📊 {title}</span>", unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # --- Chat Display Area ---
+    # Chat Display Area 
     st.markdown("<h3>Chat</h3>", unsafe_allow_html=True)
-    # Create a container for the chat messages
+    # container for the chat messages
     chat_display_container = st.container()
-    # Apply the chat-container style to this container specifically
+    # chat-container style to this container specifically
 
     chat_display_container.markdown("<div class='chat-container' id='chat-container-div'>", unsafe_allow_html=True) # Start the styled div
 

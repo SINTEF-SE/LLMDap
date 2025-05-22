@@ -23,7 +23,7 @@ def show():
     st.title("Dataset Browser")
     st.write("Browse and select datasets for analysis using the database index.")
 
-    # --- Initialization ---
+    
     # Initialize database (creates table if needed)
     try:
         db_utils.init_db()
@@ -38,7 +38,7 @@ def show():
     # 'datasets' now holds the current page's data from DB, loaded below
     # 'selected_datasets' will hold the full data for selected items when navigating
 
-    # --- Settings ---
+    # Settings 
     datasets_per_page = 10 # Default, can be made configurable
     with st.expander("Settings & Actions", expanded=True): # Expand by default
         datasets_per_page = st.slider("Datasets per page:", min_value=5, max_value=50, value=datasets_per_page, step=5, key="datasets_per_page_slider")
@@ -69,11 +69,11 @@ def show():
                      st.session_state.current_dataset_page = 0
                      st.rerun() # Reload data after scan
 
-    # --- Search ---
+    #  Search 
     st.header("Browse Datasets")
     search_term = st.text_input("Search datasets (by title, description, organism, etc.):", key="dataset_search")
 
-    # --- Data Loading & Pagination ---
+    #  Data Loading & Pagination
     try:
         total_datasets = db_utils.get_dataset_count(search_term if search_term else None)
         print(f"[DATASETS_PAGE] Total matching datasets from DB: {total_datasets}") # Print count
@@ -102,7 +102,7 @@ def show():
         st.error("Please ensure the database file exists and the schema is correct. Try running the 'Scan/Update' button.")
         return # Stop execution if DB fails
 
-    # --- Pagination Controls ---
+    # Pagination Controls 
     if total_datasets > datasets_per_page:
         st.write(f"Page {st.session_state.current_dataset_page + 1} of {total_pages}")
         cols = st.columns([1, 1, 2, 1, 1])
@@ -135,7 +135,7 @@ def show():
             st.session_state.current_dataset_page = total_pages - 1
             st.rerun()
 
-    # Select/Deselect All Buttons for Current Page ---
+    # Select/Deselect All Buttons for Current Page 
     if datasets_on_page: # Only show if there are datasets on the page
         select_cols = st.columns(2)
         with select_cols[0]:
@@ -160,7 +160,7 @@ def show():
                             pass # Item already removed
                 st.rerun()
 
-    # --- Display Datasets ---
+    # Display Datasets 
     with st.expander("Available Datasets", expanded=True):
         if datasets_on_page:
             for i, dataset_dict in enumerate(datasets_on_page):
@@ -186,16 +186,16 @@ def show():
                         if desc: st.markdown(f"*{desc}*")
 
                     with col2:
-                        # --- Existing Fields ---
-                        organism = dataset.get('organism') # Removed default 'Unknown' to check existence
-                        if organism and organism != 'N/A': # Check if value exists and is not 'N/A'
+                        #  Existing Fields 
+                        organism = dataset.get('organism') # Removed default Unknown to check existence
+                        if organism and organism != 'N/A': # Check if value exists and is not N/A
                             st.markdown(f"🧬 **Organism:** {organism}")
 
                         study_type = dataset.get('study_type')
                         if study_type and study_type != 'N/A':
                             st.markdown(f"🔬 **Study type:** {study_type}")
 
-                        # --- New Fields ---
+                        # New Fields 
                         organism_part = dataset.get('organism_part')
                         if organism_part and organism_part != 'N/A':
                             st.markdown(f"🔬 **Organism Part:** {organism_part}") # Using same icon as study type, adjust if needed
@@ -215,7 +215,7 @@ def show():
                              display_hw = hardware[:40] + '...' if len(hardware) > 40 else hardware
                              st.markdown(f"💻 **Hardware:** {display_hw}")
 
-                        # --- Existing ID/PMID ---
+                        # Existing ID/PMID 
                         st.markdown(f"📋 **ID:** `{dataset.get('accession', 'Unknown')}`")
                         pmid = dataset.get('pmid')
                         pmid_str = str(pmid) if pmid is not None else ''
@@ -259,7 +259,7 @@ def show():
         else:
             st.info("No datasets found in the database. Try the 'Scan/Update Dataset Index' button.")
 
-    # --- Selected Datasets Section ---
+    # Selected Datasets Section 
     st.header("Selected Datasets", divider="gray")
     num_selected = len(st.session_state.globally_selected_items)
 

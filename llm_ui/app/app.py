@@ -2,11 +2,11 @@ import streamlit as st
 import sys
 import os
 
-# Add the project root to the path so imports work correctly
+# project root to the path so imports work correctly
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
 sys.path.append(project_root)
 
-# Also add the profiler directory specifically to fix the load_modules import
+# profiler directory specifically to fix the load_modules import
 profiler_dir = os.path.join(project_root, 'profiler')
 sys.path.append(profiler_dir)
 
@@ -23,11 +23,11 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# IMPORTANT: Print current directory and check file existence
+# Print current directory and check file existence
 print(f"Current directory: {os.getcwd()}")
 print(f"Pages directory content: {os.listdir(os.path.join(os.path.dirname(__file__), 'pages'))}")
 
-# using consistent imports for all pages
+# consistent imports for all pages
 from llm_ui.app.pages import home, configure, profiler, provider, datasets, consumer_QA
 
 def main():
@@ -35,7 +35,7 @@ def main():
     if 'nav_page' not in st.session_state:
         st.session_state.nav_page = "Home"
     
-    # Create a consistent container for the sidebar
+    # consistent container for the sidebar
     sidebar = st.sidebar.container()
     
     with sidebar:

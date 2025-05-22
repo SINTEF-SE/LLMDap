@@ -16,7 +16,7 @@ DB_PATH = os.path.join(project_root, 'llm_ui', 'app', 'datasets.db')
 USER_DATASETS_DIR = os.path.join(project_root, 'llm_ui', 'app', 'user_datasets')
 DATA_DIR = os.path.join(project_root, 'data')
 
-# --- DB Connection and Initialization ---
+# DB Connection and Initialization 
 def get_db_connection():
     """Establishes a connection to the SQLite database.""" 
     conn = sqlite3.connect(DB_PATH, timeout=10) # Increased timeout
@@ -50,7 +50,7 @@ def init_db():
                 experimental_factors TEXT
             )
         ''')
-        # Add indexes
+        # indexes
         indexes = [
             "CREATE INDEX IF NOT EXISTS idx_accession ON datasets (accession)",
             "CREATE INDEX IF NOT EXISTS idx_pmid ON datasets (pmid)",
@@ -73,7 +73,7 @@ def init_db():
          if conn:
              conn.close()
 
-# --- Data Upsert Functions ---
+# Data Upsert Functions 
 def _prepare_data_tuple(metadata, columns):
     """Prepares a tuple from metadata dictionary for DB insertion."""
     now = datetime.now()
@@ -112,7 +112,7 @@ def upsert_dataset(metadata):
         '''
         cursor.execute(sql, data_tuple)
         conn.commit()
-        print(f"[DB_UTILS] Successfully upserted single record: {metadata.get('file_path')}") # Add success print
+        print(f"[DB_UTILS] Successfully upserted single record: {metadata.get('file_path')}") #  success print
     except sqlite3.Error as e:
         print(f"[ERROR][DB_UTILS] Database error during single upsert for {metadata.get('file_path')}: {e}")
         print(f"  SQLite Error Code: {e.sqlite_errorcode}")
@@ -147,7 +147,7 @@ def batch_upsert_datasets(metadata_list):
             INSERT OR REPLACE INTO datasets ({', '.join(columns)})
             VALUES ({', '.join(['?'] * len(columns))})
         '''
-        # Use a transaction for batch insert
+        #  transaction for batch insert
         conn.execute("BEGIN TRANSACTION")
         cursor.executemany(sql, data_tuples)
         conn.commit()
@@ -156,7 +156,7 @@ def batch_upsert_datasets(metadata_list):
     except sqlite3.Error as e:
         print(f"[ERROR][DB_UTILS] Database error during batch upsert: {e}")
         if conn: conn.rollback() # Rollback transaction on error
-        # Optionally try individual upserts as fallback here
+        
         print(f"  Attempting individual upserts for failed batch...")
         failed_count = 0
         for metadata in metadata_list:
@@ -175,7 +175,7 @@ def batch_upsert_datasets(metadata_list):
             conn.close()
     return inserted_count
 
-# --- Metadata Extraction Helpers ---
+# Metadata Extraction Helpers 
 def _fetch_pubmed_title(pmid):
     """Fetches the title for a given PMID from PubMed."""
     if not pmid or pmid == 'unknown' or not str(pmid).isdigit():
@@ -183,7 +183,7 @@ def _fetch_pubmed_title(pmid):
     try:
         pubmed_url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id={pmid}&retmode=xml"
         response = requests.get(pubmed_url, timeout=10)
-        time.sleep(0.4) # Be nice to NCBI
+        time.sleep(0.4) # Being nice to NCBI
         response.raise_for_status()
         root = ET.fromstring(response.text)
         article_title = root.find(".//ArticleTitle")
@@ -220,11 +220,11 @@ def _extract_metadata_for_db(file_path):
         'sample_count', 'release_date', 'experimental_factors']})
 
     is_user_saved_file = 'user_datasets' in file_path.replace(os.sep, '/')
-    # Check source field within JSON as well, if it exists
+    # Check source field within JSON aswell, if it exists
     is_user_provider_source_in_json = isinstance(data, dict) and data.get('source') == 'user_provider'
 
     if is_user_saved_file or is_user_provider_source_in_json:
-        # --- REVISED LOGIC for User Provider Files ---
+        # REVISED LOGIC for User Provider Files 
         metadata = {'file_path': file_path, 'source': 'user_provider'}
 
         # 1. Initialize metadata with file_path and source
@@ -242,7 +242,7 @@ def _extract_metadata_for_db(file_path):
         metadata['accession'] = user_accession_match.group(1) if user_accession_match else data.get('accession')
         metadata['pmid'] = pmid_match.group(1) if pmid_match else data.get('pmid')
 
-        # 3. Find the 'filled_form' data
+        # 3. Find the filled_form data
         form_data = None
         if isinstance(data, dict):
             if "0" in data and isinstance(data["0"], dict) and "filled_form" in data["0"]:
@@ -251,7 +251,7 @@ def _extract_metadata_for_db(file_path):
                  form_data = data.get("form")
             elif "filled_form" in data and isinstance(data["filled_form"], dict):
                 form_data = data.get("filled_form")
-            # If not nested, maybe the top level IS the form data? Check for a known key.
+            
             elif 'study_type_18' in data or 'organism_part_5' in data: # Check for example suffixed keys
                  form_data = data
 
@@ -329,7 +329,7 @@ def _extract_metadata_for_db(file_path):
         metadata.setdefault('description', 'User-provided dataset via Provider page.')
         metadata.setdefault('organism', 'Unknown')
         metadata.setdefault('study_type', 'Unknown')
-        # --- END REVISED LOGIC ---
+        
 
     elif any(pattern in filename for pattern in ["arxpr_simplified.json", "arxpr_metadataset", "arxpr2_25"]):
          return None # Skip bulk files in this function
@@ -418,30 +418,30 @@ def _extract_metadata_from_bulk_entry(entry: Dict[str, Any], file_path: str) -> 
     }
 
     try:
-        # --- Direct Mapping (Adjust keys based on actual bulk JSON structure) ---
+        # Direct Mapping (Adjust keys based on actual bulk JSON structure) 
         metadata['accession'] = entry.get('accession')
         metadata['title'] = entry.get('title')
         metadata['description'] = entry.get('description')
         metadata['organism'] = entry.get('organism') # Assumes 'organism' key exists
         metadata['pmid'] = entry.get('pmid')
 
-        # --- Mapping based on common ArrayExpress / SDRF concepts ---
+        # Mapping based on common ArrayExpress / SDRF concepts 
         # Map experimenttype to study_type
         metadata['study_type'] = entry.get('experimenttype') or entry.get('study_type') # Prioritize specific key if available
 
         # Map performer/protocol info to hardware/technology
-        # This might need refinement based on how hardware is listed (e.g., in 'performer' or 'protocol' fields)
+        # This might need refinement based on how hardware is listed 
         metadata['hardware'] = entry.get('performer') or entry.get('hardware') # Example: use 'performer' if 'hardware' key missing
         metadata['technology'] = entry.get('technology') # If a specific technology field exists
 
-        # --- Attempt to extract other fields (Requires knowing the bulk JSON structure) ---
+        #  Attempt to extract other fields (Requires knowing the bulk JSON structure) 
         # These are examples - **adjust the entry.get('key_name') based on your actual bulk JSON keys**
         metadata['organism_part'] = entry.get('organism_part') or entry.get('sample_characteristic_organism_part') # Example keys
         metadata['experimental_designs'] = entry.get('experimental_design') or entry.get('experiment_design') # Example keys
         metadata['assay_by_molecule'] = entry.get('assay_name') or entry.get('assay_type') # Example keys
 
 
-        # --- Set file_path based on accession for uniqueness if needed ---
+        # Set file_path based on accession for uniqueness if needed 
         # The primary key in the DB is file_path, so we need a unique value.
         # Using the accession (if available) combined with the source file ensures uniqueness.
         acc = metadata['accession']
@@ -469,7 +469,7 @@ def _extract_metadata_from_bulk_entry(entry: Dict[str, Any], file_path: str) -> 
         return {'file_path': f"{file_path}::error_{acc}", 'accession': acc, 'title': f"Error Extracting {acc}"}
 
 
-# --- PubMed Title Fetching ---
+# PubMed Title Fetching 
 def _fetch_pubmed_titles_batch(pmids):
     """Fetches titles for a batch of PMIDs."""
     titles = {}
@@ -481,7 +481,7 @@ def _fetch_pubmed_titles_batch(pmids):
     try:
         pubmed_url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id={pmid_list}&retmode=xml"
         response = requests.get(pubmed_url, timeout=20)
-        time.sleep(0.4) # Be nice to NCBI
+        time.sleep(0.4) # Being nice to NCBI
         response.raise_for_status()
         root = ET.fromstring(response.text)
         for article in root.findall(".//PubmedArticle"):
@@ -638,7 +638,7 @@ def scan_and_update_db(directories):
     print(f"[DB_UTILS] Finished scanning and updating. Processed {processed_count} individual files and {bulk_processed_count} entries from bulk files.")
 
 
-# --- Data Retrieval Functions ---
+# Data Retrieval Functions 
 def get_dataset_count(search_term: Optional[str] = None) -> int:
     """Gets the total number of datasets, optionally filtered by a search term across multiple fields."""
     conn = None
@@ -701,7 +701,7 @@ def get_datasets_page(page_num: int, page_size: int, search_term: Optional[str] 
                  # Add parameter for each clause
                 params = [f'%{search_term}%'] * len(where_clauses)
 
-        # Add ORDER BY, LIMIT and OFFSET - these are safe with f-strings as they are integers
+        # ORDER BY, LIMIT and OFFSET - these are safe with f-strings as they are integers
         sql += f" ORDER BY last_updated DESC LIMIT {int(page_size)} OFFSET {int(offset)}"
 
         #print(f"[DB UTILS get_datasets_page] SQL: {sql}") # Uncomment for debugging SQL
