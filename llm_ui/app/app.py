@@ -7,8 +7,8 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
 sys.path.append(project_root)
 
 # profiler directory specifically to fix the load_modules import
-profiler_dir = os.path.join(project_root, 'profiler')
-sys.path.append(profiler_dir)
+# profiler_dir = os.path.join(project_root, 'profiler')
+# sys.path.append(profiler_dir)
 
 # Configure Streamlit page
 st.set_page_config(page_title="UPCAST Profiler", page_icon=":bar_chart:", layout="wide")
@@ -28,7 +28,7 @@ print(f"Current directory: {os.getcwd()}")
 print(f"Pages directory content: {os.listdir(os.path.join(os.path.dirname(__file__), 'pages'))}")
 
 # consistent imports for all pages
-from llm_ui.app.pages import home, configure, profiler, provider, datasets, consumer_QA
+from llm_ui.app.pages import home, configure, provider, datasets, consumer_QA
 
 def main():
     # Initialize session state variables
@@ -57,7 +57,6 @@ def main():
             "Dataset Browser": datasets.show,  
             "Consumer Q&A": consumer_QA.show,  
             "Provider": provider.show,
-            "Profiler": profiler.show,
             "Configure": configure.show
         }
         
@@ -104,6 +103,5 @@ def main():
 
 if __name__ == "__main__":
     print("Project root:", project_root)
-    print("Profiler directory:", profiler_dir)
     main()
 

@@ -31,10 +31,10 @@ def show():
         "Consumer QA": "Consumer Q&A",
         "Configure Settings": "Configure",
         "Provider Interaction": "Provider",
-        "Run Profiler": "Profiler"
+        
     }
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
 
     with col1:
         if st.button("Manage Datasets"):
@@ -52,7 +52,4 @@ def show():
             st.session_state.show_page = page_map["Provider Interaction"]
             st.rerun()
 
-    with col3:
-        if st.button("Run Profiler"):
-            st.session_state.show_page = page_map["Run Profiler"]
-            st.rerun()
+    

@@ -7,7 +7,6 @@ This module contains various UI pages.
 # Keep these imports for compatibility with older code
 from . import home
 from . import configure
-from . import profiler
 from . import provider
 try:
     from . import consumer_QA
