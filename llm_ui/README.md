@@ -1,3 +1,11 @@
+## License
+
+This frontend (`llm_ui`) is licensed under the [MIT License].
+
+You are free to use, modify, and distribute this code, provided you include the original copyright notice.
+
+> Note: Only the `llm_ui` (frontend) component is covered by the MIT License. Other parts of this repository, such as the backend, may be subject to different licensing or ownership terms.
+
 Overview
 LLM-UI is a Streamlit-based web application for interacting with biomedical research datasets from ArrayExpress/BioStudies using Large Language Models (LLMs). It allows researchers to browse datasets, ask questions about them, process scientific papers, and extract metadata in a structured way.
 
