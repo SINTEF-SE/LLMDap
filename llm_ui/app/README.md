@@ -26,7 +26,7 @@ pip install -r requirements.txt ( the the frontend folder.)
 3. set up OpenAI API key ( if using openAI) 
 # Create a file in llm_ui/app/openai_key.py
 echo 'API_KEY = "your-openai-api-key"' > llm_ui/app/openai_key.py 
-note: this is not the most secure way and should not be pushed to a local git repo.
+note: this is not the most secure way and should not be pushed to a local git repo. 
 
 4. Prepare the user_datasets directory:
 mkdir -p llm_ui/app/user_datasets
