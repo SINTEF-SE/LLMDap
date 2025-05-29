@@ -8,6 +8,8 @@ You are free to use, modify, and distribute this code, provided you include the 
 
 Overview
 LLM-UI is a Streamlit-based web application for interacting with biomedical research datasets from ArrayExpress/BioStudies using Large Language Models (LLMs). It allows researchers to browse datasets, ask questions about them, process scientific papers, and extract metadata in a structured way.
+Currently as of may 29. 2025 the best results comes from using a PUBmed link directly. XML with proper formatting also works well, but PDF and DOI will not give consistent results!
+even if the results are not optimal as long as theres a PMID then the LLM will give an okay- to good answer as it will be able to fetch more data through API's. 
 
 Features
 Dataset Browser: View, search, and select datasets stored in a local SQLite database
