@@ -22,7 +22,7 @@ def define_semantic_model(llm: str):
     return evaluator
 
 
-def similarity(a,b, a_func = max, b_func = sum, semantic=True):
+def similarity(a,b, a_func = max, b_func = sum, semantic=True, semantic_model = None):
     """ simple similarity measure (from short tests i guess its something like the ratio of letters in the longest that are in the shortest (probably with same order))
     its symmetric
     in any case, we should look more into better ways of diong this (llm? embedding? or other similarity measire https://stackoverflow.com/questions/17388213/find-the-similarity-metric-between-two-strings#17388505 )
@@ -37,8 +37,14 @@ def similarity(a,b, a_func = max, b_func = sum, semantic=True):
 
 
     if semantic:
-        semantic_eval = define_semantic_model("llama3.1:8b")
-        result = asyncio.run(semantic_eval.aevaluate(response=a.lower(), reference=b.lower()))        
+        if semantic_model is None:
+            semantic_eval = define_semantic_model("llama3.1:8b")
+        elif type(semantic_model) is str:
+            semantic_eval = define_semantic_model(semantic_model)
+        else:
+            semantic_eval = semantic_model
+        result = semantic_eval.evaluate(response=a.lower(), reference=b.lower())
+        #result = asyncio.run(semantic_eval.aevaluate(response=a.lower(), reference=b.lower()))        
         return result.score
     
     else:

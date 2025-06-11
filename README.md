@@ -29,9 +29,6 @@ python main.py --dataset simple_test --no-log
 
 Look through `introduction.ipynb` for an introduction to how the different parts work.
 
-
-For running inference - i.e. for analysing one or several papers for the purpose of the output instead of evaluation with labels,
-use run_inference.call_inference()
 ## Quick file overview
 
 Folders:

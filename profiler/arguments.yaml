@@ -1,7 +1,7 @@
 dataset__args:
     dataset:
         default: "arxpr2"
-        help: 'one of ["ega","nhrf", "nhrf2", "nhrf3", "simple_test", "study_type", "arxpr","arxpr2"]'
+        help: 'one of ["ega","nhrf", "nhrf2", "nhrf3", "simple_test", "study_type", "arxpr","arxpr2", "arxpr3"]'
     dataset_literal_length:
         default: 25
         help:  'number of allowable answers, among 25,50,100,200,400.'
@@ -128,6 +128,6 @@ query_storage__args:
         help: "wether to save results to json"
 
 other__args:
-    log:
+    log_to_weave:
         default: False #True
         help: "Log inputs/outputs to weave"

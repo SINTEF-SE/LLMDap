@@ -53,10 +53,9 @@ def call_inference(
     args=SimpleNamespace(**parameters)
     args.load=False
     args.save=False
-    args.schema = schema
 
     # load stuff
-    prepared_kwargs = load_modules(args)
+    prepared_kwargs = load_modules(args, inference_schema = schema)
     ff_iterator = FormFillingIterator(args, **prepared_kwargs)
 
     # make the argument into dictionary
@@ -106,27 +105,36 @@ if __name__ == "__main__":
     with open(path, "r") as f:
         raw_xml_paper_text = f.read()
 
-    paper_path = path
+    #paper_path = path
     paper_url = "https://www.ncbi.nlm.nih.gov/research/bionlp/RESTful/pmcoa.cgi/BioC_xml/12093373/ascii"
     paper_url2= "https://www.ncbi.nlm.nih.gov/research/bionlp/RESTful/pmcoa.cgi/BioC_xml/12095422/ascii"
 
 
     from metadata_schemas.arxpr2_schema import Metadata_form as schema
+    from metadata_schemas.arxpr2_schema import get_shuffled_form_generator
+    schema = get_shuffled_form_generator(25, v3=True)()
+    #from metadata_schemas.nhrf_qa_schema import Metadata_form as schema
 
     output = call_inference(
             schema,
             #
             # choose one to try out:
             #
-            #parsed_paper_text = parsed_xml_paper_text,
+            parsed_paper_text = parsed_xml_paper_text,#[1500:2000],
             #raw_xml_paper_text = raw_xml_paper_text,
             #paper_path = paper_path,
             #paper_path = [paper_path, path2],
             #paper_url = paper_url,
-            paper_url = {"paper1": paper_url, "paper2":paper_url2},
+            #paper_url = {"paper1": paper_url, "paper2":paper_url2},
             #
-            similarity_k = 5,
+            similarity_k = 2,
             field_info_to_compare = "choices",
+            #field_info_to_compare = "description",
+            #context_shortener = "full_paper",
+            #ff_model = "jakiAJK/DeepSeek-R1-Distill-Llama-8B_GPTQ-int4",
+            #ff_model = "llama3.1I-8b-q4",
+            #ff_model = "TheBloke/Mistral-7B-v0.1-GPTQ",
+            ff_model = "4om",
             )
 
     print("output:")

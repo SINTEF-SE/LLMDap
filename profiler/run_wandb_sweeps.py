@@ -1,17 +1,19 @@
 import wandb
-import dspy
 from argparse import Namespace
 import yaml
 from types import SimpleNamespace
+import outlines
+import torch
 
 from load_modules import load_modules
 from run_modules import FormFillingIterator
 
 # Load llm now instead of for each run
-model_id = "hugging-quants/Meta-Llama-3.1-8B-Instruct-GPTQ-INT4"
+#model_id = "hugging-quants/Meta-Llama-3.1-8B-Instruct-GPTQ-INT4"
 #model_id = "TheBloke/Mistral-7B-v0.1-GPTQ"
-dspy_model = dspy.HFModel(model = model_id)
-#dspy_model = None
+#model_id = "jakiAJK/DeepSeek-R1-Distill-Llama-8B_GPTQ-int4"
+#outlines_model = outlines.models.transformers(model_name=model_id, device = "cuda:2" if torch.cuda.device_count()>1 else "cuda:0")
+outlines_model = None
 
 PRELOADED_DATASET = None
 
@@ -40,7 +42,7 @@ def sweep_single_run():
     args = wandb.config
 
 
-    prepared_kwargs = load_modules(args, preloaded_dspy_model = dspy_model, preloaded_dataset = PRELOADED_DATASET)
+    prepared_kwargs = load_modules(args, preloaded_outlines_model = outlines_model, preloaded_dataset = PRELOADED_DATASET)
     args = args._items
     args.pop("_wandb")
     # use floats in argstring to load results in run_modules
@@ -83,16 +85,16 @@ gpt_sota= { # gpt using choices for retrieval
         "ff_model" :{"values" : ["4om"]},
         "field_info_to_compare" : {"values":[
             "choices",
-            "choice-list",
+            #"choice-list",
             ]},
         "include_choice_every" : {"values" :[
-            #1, # 25 values
+            1, # 25 values
             2, # 12 values
-            #3, # 8 values
-            4, # 6 values
-            #5, # 5 values
-            6, # 4 values
-            #8, # 3 vales
+            3, # 8 values
+            #4, # 6 values
+            5, # 5 values
+            #6, # 4 values
+            8, # 3 vales
             12, # 2 values
             24, # 1 value
             ]},
@@ -112,16 +114,16 @@ llama_sota= { # llama using choices for retrieval
         "ff_model" :{"values" : ["hugging-quants/Meta-Llama-3.1-8B-Instruct-GPTQ-INT4"]},
         "field_info_to_compare" : {"values":[
             "choices",
-            "choice-list",
+            #"choice-list",
             ]},
         "include_choice_every" : {"values" :[
-            #1, # 25 values
+            1, # 25 values
             2, # 12 values
-            #3, # 8 values
-            4, # 6 values
-            #5, # 5 values
-            6, # 4 values
-            #8, # 3 vales
+            3, # 8 values
+            #4, # 6 values
+            5, # 5 values
+            #6, # 4 values
+            8, # 3 vales
             12, # 2 values
             24, # 1 value
             ]},
@@ -131,20 +133,42 @@ llama_sota= { # llama using choices for retrieval
         "sampler_temp" : {"value" : 0.001},
         }
 mistral_sota= { # mistral using choices for retrieval
-        "ff_model" :{"values" : ["hugging-quants/Meta-Llama-3.1-8B-Instruct-GPTQ-INT4"]},
         "ff_model" :{"values" : ["TheBloke/Mistral-7B-v0.1-GPTQ"]},
+        "field_info_to_compare" : {"values":[
+            "choices",
+            #"choice-list",
+            ]},
+        "include_choice_every" : {"values" :[
+            1, # 25 values
+            2, # 12 values
+            3, # 8 values
+            #4, # 6 values
+            5, # 5 values
+            #6, # 4 values
+            8, # 3 vales
+            12, # 2 values
+            24, # 1 value
+            ]},
+        "chunk_size" : {"value" : 300},
+        "similarity_k" : {"value" : 4},
+        "sampler" : {"value" : "multi"},
+        "sampler_temp" : {"value" : 0.001},
+        }
+
+deepseek_sota= { # mistral using choices for retrieval
+        "ff_model" :{"values" : ["jakiAJK/DeepSeek-R1-Distill-Llama-8B_GPTQ-int4"]},
         "field_info_to_compare" : {"values":[
             "choices",
             "choice-list",
             ]},
         "include_choice_every" : {"values" :[
-            #1, # 25 values
+            1, # 25 values
             2, # 12 values
-            #3, # 8 values
+            3, # 8 values
             4, # 6 values
-            #5, # 5 values
+            5, # 5 values
             6, # 4 values
-            #8, # 3 vales
+            8, # 3 vales
             12, # 2 values
             24, # 1 value
             ]},
@@ -165,6 +189,8 @@ llama_rag= { # llama using rag for retrieval
         "similarity_k" : {"values" : [
             4,
             ]},
+        "sampler" : {"value" : "multi"},
+        "sampler_temp" : {"value" : 0.001},
         }
 mistral_rag = { # mistral using description for retrieval
         "ff_model" :{"values" : ["TheBloke/Mistral-7B-v0.1-GPTQ"]},
@@ -177,6 +203,22 @@ mistral_rag = { # mistral using description for retrieval
         "similarity_k" : {"values" : [
             4,
             ]},
+        "sampler" : {"value" : "multi"},
+        "sampler_temp" : {"value" : 0.001},
+        }
+deepseek_rag = { # mistral using description for retrieval
+        "ff_model" :{"values" : ["jakiAJK/DeepSeek-R1-Distill-Llama-8B_GPTQ-int4"]},
+        "field_info_to_compare" : {"values":[
+            "description",
+            ]},
+        "chunk_size" : {"values" : [
+            300,
+            ]},
+        "similarity_k" : {"values" : [
+            4,
+            ]},
+        "sampler" : {"value" : "multi"},
+        "sampler_temp" : {"value" : 0.001},
         }
 
 gpt_ontorag_params = {
@@ -205,6 +247,8 @@ llama_ontorag= {
         "similarity_k" : {"values" : [
             4,
             ]},
+        "sampler" : {"value" : "multi"},
+        "sampler_temp" : {"value" : 0.001},
         }
 mistral_ontorag = {
         "ff_model" :{"values" : ["TheBloke/Mistral-7B-v0.1-GPTQ"]},
@@ -219,14 +263,32 @@ mistral_ontorag = {
         "similarity_k" : {"values" : [
             4,
             ]},
+        "sampler" : {"value" : "multi"},
+        "sampler_temp" : {"value" : 0.001},
+        }
+deepseek_ontorag = {
+        "ff_model" :{"values" : ["jakiAJK/DeepSeek-R1-Distill-Llama-8B_GPTQ-int4"]},
+        "field_info_to_compare" : {"values":[
+            "onto-description",
+            "onto-label",
+            "onto-both",
+            ]},
+        "chunk_size" : {"values" : [
+            300,
+            ]},
+        "similarity_k" : {"values" : [
+            4,
+            ]},
+        "sampler" : {"value" : "multi"},
+        "sampler_temp" : {"value" : 0.001},
         }
 
-def run_sweep(parameters, dataset_length=0, sweep_count=1, method="grid", dataset = "arxpr2", name = None, fields_length = 0, mode = "train", log=True):
+def run_sweep(parameters, dataset_length=0, sweep_count=1, method="grid", dataset = "arxpr3", name = None, fields_length = 0, mode = "train", log_to_weave=True):
     # perform the wandb sweep, trying out sets of parameters and running "sweep_run"
     parameters["dataset_length"] = {"value" : dataset_length}
     parameters["fields_length"] = {"value" : fields_length}
     parameters["mode"] = {"value" : mode}
-    parameters["log"] = {"value" : log}
+    parameters["log_to_weave"] = {"value" : log_to_weave}
     if type(dataset) is str:
         parameters["dataset"] = {"value" : dataset}
         name = f"{name}_{dataset}_{sweep_count}_{dataset_length}"
@@ -251,175 +313,122 @@ def run_sweep(parameters, dataset_length=0, sweep_count=1, method="grid", datase
 
 def run_test_sweeps():
     # call run_sweep for each set of parameters
-    fl = 100
-    #run_sweep(best_choice_params, 
-    #          fields_length = fl,
-    #          sweep_count = 1,
-    #          mode = "test",
-    #          name="best_choice",
-    #          )
-    #run_sweep(gpt_rag_params, 
-    #          fields_length = fl,
-    #          sweep_count = 1,
-    #          mode = "test",
-    #          name="gpt_rag",
-    #          )
+    fl = 300
+    run_sweep(best_choice_params, 
+              fields_length = fl,
+              sweep_count = 1,
+              mode = "test",
+              name="best_choice",
+              )
+    run_sweep(gpt_rag_params, 
+              fields_length = fl,
+              sweep_count = 1,
+              mode = "test",
+              name="gpt_rag",
+              )
     run_sweep(gpt_sota, 
               fields_length = fl,
-              sweep_count = 10,
+              sweep_count = 18,
               mode = "test",
               name="gpt_sota",
               )
-    #run_sweep(fullpaper_params, 
-    #          fields_length = fl,
-    #          sweep_count = 1,
-    #          mode = "test",
-    #          name="gpt_fullpaper",
-    #          )
-    #run_sweep(gpt_ontorag_params, 
-    #          fields_length = fl,
-    #          sweep_count = 1,
-    #          mode = "test",
-    #          name="gpt_onto_test",
-    #          )
-
+    run_sweep(fullpaper_params, 
+              fields_length = fl,
+              sweep_count = 1,
+              mode = "test",
+              name="gpt_fullpaper",
+              )
+    run_sweep(gpt_ontorag_params, 
+              fields_length = fl,
+              sweep_count = 1,
+              mode = "test",
+              name="gpt_onto_test",
+              )
+    run_sweep(llama_rag, 
+              fields_length = fl,
+              sweep_count = 1,
+              mode = "test",
+              name="llama_rag",
+              )
+    run_sweep(llama_ontorag, 
+              fields_length = fl,
+              sweep_count = 1,
+              mode = "test",
+              name="llama_onto_test",
+              )
     run_sweep(llama_sota, 
               fields_length = fl,
-              sweep_count = 10,
+              sweep_count = 18,
               mode = "test",
               name="llama_sota",
               )
-    #run_sweep(llama_rag, 
-    #          fields_length = fl,
-    #          sweep_count = 1,
-    #          mode = "test",
-    #          name="llama_rag",
-    #          )
-    #run_sweep(llama_ontorag, 
-    #          fields_length = fl,
-    #          sweep_count = 1,
-    #          mode = "test",
-    #          name="llama_onto_test",
-    #          )
-
-    global dspy_model
-    del dspy_model
+    global outlines_model
+    del outlines_model
     import time
     time.sleep(60*5)
     model_id = "TheBloke/Mistral-7B-v0.1-GPTQ"
-    dspy_model = dspy.HFModel(model = model_id)
+    outlines_model = outlines.models.transformers(model_name=model_id, device = "cuda:2" if torch.cuda.device_count()>1 else "cuda:0")
 
+    run_sweep(mistral_rag, 
+              fields_length = fl,
+              sweep_count = 1,
+              mode = "test",
+              name="mistral_rag",
+              )
+    run_sweep(mistral_ontorag, 
+              fields_length = fl,
+              sweep_count = 1,
+              mode = "test",
+              name="mistral_onto_test",
+              )
     run_sweep(mistral_sota, 
               fields_length = fl,
-              sweep_count = 10,
+              sweep_count = 18,
               mode = "test",
               name="misrtal_rag",
               )
-    #run_sweep(mistral_rag, 
+
+    #global outlines_model
+    #del outlines_model
+    #import time
+    #time.sleep(60*5)
+    #model_id = "jakiAJK/DeepSeek-R1-Distill-Llama-8B_GPTQ-int4"
+    #outlines_model = outlines.models.transformers(model_name=model_id, device = "cuda:2" if torch.cuda.device_count()>1 else "cuda:0")
+
+    #run_sweep(deepseek_rag, 
     #          fields_length = fl,
     #          sweep_count = 1,
     #          mode = "test",
-    #          name="mistral_rag",
+    #          name="deeps_rag_test",
     #          )
-    #run_sweep(mistral_ontorag, 
+    #run_sweep(deepseek_ontorag, 
     #          fields_length = fl,
     #          sweep_count = 1,
     #          mode = "test",
-    #          name="mistral_onto_test",
+    #          name="deeps_onto_test",
+    #          )
+    #run_sweep(deepseek_sota, 
+    #          fields_length = fl,
+    #          sweep_count = 10,
+    #          mode = "test",
+    #          name="deepseek_sota_test",
     #          )
 
 
-
-# sets of parameters used for tuing
-llama_decodetune= {
-        "ff_model" :{"values" : ["hugging-quants/Meta-Llama-3.1-8B-Instruct-GPTQ-INT4"]},
-        "field_info_to_compare" : {"values":[
-            #"description",
-            "choices",
-            #"choice-list",
-            ]},
-        "chunk_size" : {"value" : 300},
-        "similarity_k" : {"value" : 4},
-        "sampler_beams": {"values" : [3,5]},
-        }
-llama_decodetune2= {
-        "ff_model" :{"values" : ["hugging-quants/Meta-Llama-3.1-8B-Instruct-GPTQ-INT4"]},
-        "field_info_to_compare" : {"values":[
-            #"description",
-            "choices",
-            #"choice-list",
-            ]},
-        "chunk_size" : {"value" : 300},
-        "similarity_k" : {"value" : 4},
-        "sampler" : {"values" : ["multi"]},
-        "sampler_temp" : {"values" : [0.001,0.01,0.05]},#, 0.1, 0.2,0.3, 0.5, 0.7]},
-        }
-mist_decodetune= {
-        "ff_model" :{"values" : ["TheBloke/Mistral-7B-v0.1-GPTQ"]},
-        "field_info_to_compare" : {"values":[
-            #"description",
-            "choices",
-            #"choice-list",
-            ]},
-        "chunk_size" : {"value" : 300},
-        "similarity_k" : {"value" : 4},
-        "sampler_beams": {"values" : [3,5]},
-        }
-mist_decodetune2= {
-        "ff_model" :{"values" : ["TheBloke/Mistral-7B-v0.1-GPTQ"]},
-        "field_info_to_compare" : {"values":[
-            #"description",
-            "choices",
-            #"choice-list",
-            ]},
-        "chunk_size" : {"value" : 300},
-        "similarity_k" : {"value" : 4},
-        "sampler" : {"values" : ["multi"]},
-        "sampler_temp" : {"values" : [0.001,0.01,0.05]},#, 0.1, 0.2,0.3, 0.5, 0.7]},
-        }
-
-deepseek_rag= { 
-        "ff_model" :{"values" : ["jakiAJK/DeepSeek-R1-Distill-Llama-8B_GPTQ-int4"]},
-        "field_info_to_compare" : {"values":[
-            "description",
-            ]},
-        "chunk_size" : {"values" : [
-            300,
-            ]},
-        "similarity_k" : {"values" : [
-            4,
-            ]},
-        }
 
 
 if __name__ == "__main__":
     run_test_sweeps()
-    quit()
-    fl = 2
-    run_sweep(deepseek_rag, 
-              fields_length = fl,
-              sweep_count = 1,
-              #mode = "test",
-              name="ds_rag",
-              )
-    quit()
-
-    fl = 50
-    run_sweep(gpt_ontorag_params, 
-              fields_length = fl,
-              sweep_count = 3,
-              #mode = "test",
-              name="gpt_onto",
-              )
-    run_sweep(llama_ontorag, 
-              fields_length = fl,
-              sweep_count = 3,
-              #mode = "test",
-              name="llama_onto",
-              )
-    run_sweep(mistral_ontorag, 
-              fields_length = fl,
-              sweep_count = 3,
-              #mode = "test",
-              name="mistral_onto",
-              )
+    #fl = 2
+    #run_sweep(llama_ontorag, 
+    #          fields_length = fl,
+    #          sweep_count = 1,
+    #          #mode = "test",
+    #          name="llama_onto",
+    #          )
+    #run_sweep(deepseek_rag, 
+    #          fields_length = fl,
+    #          sweep_count = 1,
+    #          #mode = "test",
+    #          name="ds_rag",
+    #          )

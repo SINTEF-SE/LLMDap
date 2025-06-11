@@ -3,58 +3,58 @@ from pydantic import constr
 from pydantic_core._pydantic_core import ValidationError as pydantic_ValidationError
 import pydantic
 import typing
-import dspy
 import weave
 import json
 import copy
 import pprint
 import numpy as np
 from difflib import SequenceMatcher
+import openai
 
-from form_filling.dspy_x_outlines import make_dspy_generator, make_constrained_generator
-from form_filling.dspy_x_openai import GPT3
+
 from form_filling import listify_pydantic
-
-class OpenAIFormFillSignature(dspy.Signature):
-    # dspy signature (prompt template) for sequential form filling (i.e. one field at a time), field-agnistic.
-    """
-    You are to fill out a form based on some context from a part of a scientific paper or document.
-    Use only the context to reply. If the answer is not in the context directly, make a qualified guess based on what is in the context.
-    """ 
-
-    context = dspy.InputField()
-
-    answer = dspy.OutputField()
-
-class FormFillSignature(dspy.Signature):
-    # dspy signature (prompt template) for sequential form filling (i.e. one field at a time), field-agnistic.
-    """
-    You are to fill out values of a form based on some context from a part of a scientific paper or document.
-    Use only the context to reply. If the answer is not in the context directly, make a qualified guess based on what is in the context.
-    """ 
-
-    context = dspy.InputField()
-    answer_field_name = dspy.InputField()
-    answer_field_type = dspy.InputField()
-    answer_field_description = dspy.InputField()
-    answer_field_examples = dspy.InputField()
-
-    answer = dspy.OutputField()
+from form_filling import regex_handling
 
 
-class ListedFormFillSignature(dspy.Signature):
-    # dspy signature (prompt template) for sequential form filling (i.e. one field at a time), field-agnistic.
-    """
-    You are to fill out values of a form based on some context from a part of a scientific paper or document.
-    Use only the context to reply. If the answer is not in the context directly, make a qualified guess based on what is in the context.
-    Answer in list form, as many answers as fitting.
-    """ 
-    context = dspy.InputField()
-    answer_field_name = dspy.InputField()
-    answer_field_type = dspy.InputField()
-    answer_field_description = dspy.InputField()
-    answer_field_examples = dspy.InputField()
-    answer = dspy.OutputField()
+
+def make_FormFillPrompt(context, 
+                        answer_field_name=None, 
+                        answer_field_type=None, 
+                        answer_field_description=None, 
+                        listed_answer = False, 
+                        prompt_for_reasoning=False,
+                        reason=None
+                        ):
+    # get prompt for sequential form filling (i.e. one field at a time), field-agnistic.
+    prompt = f"""
+You are to fill out values of a form based on some context from a part of a scientific paper or document.
+Use only the context to reply. If the answer is not in the context directly, make a qualified guess based on what is in the context.
+"""
+    if listed_answer:
+        prompt += "Answer in list form, with as many answers as fitting.\n"
+    prompt += "\n"
+
+    # Add context
+    prompt += f"context: {{{{{{{context}}}}}}}\n\n"
+
+    # Add field info
+    if not answer_field_name is None:
+        prompt += f"answer field name: {{{{{{{answer_field_name}}}}}}}\n\n"
+    if not answer_field_type is None:
+        prompt += f"answer field type: {{{{{{{answer_field_type}}}}}}}\n\n"
+    if not answer_field_description is None:
+        prompt += f"answer field description: {{{{{{{answer_field_description}}}}}}}\n\n"
+
+    # Add reasoning step
+    if prompt_for_reasoning:
+        prompt += "Reasoning step: {{{Let's think step by step. "
+        return prompt
+    if not reason is None:
+        prompt += f"Reasoning step: {{{{{{{reason}}}}}}}\n\n"
+
+    prompt += "Answer: {{{"
+    return prompt
+
 
 
 
@@ -75,47 +75,26 @@ def get_constraints_from_field(field):
 
 
 
-class FieldFiller(dspy.Module):
+class FieldFiller:
     """
-    dspy module for filling out a single field in a pydantic form.
+    Module for filling out a single field in a pydantic form.
     One FieldFiller is made per schema field, but used for multiple documents.
     document shortener is fed in the forwards fuction.
     """
-    def __init__(self, answer_generator, signature, answer_in_quotes=False, listify = False, verbose=False):
+    def __init__(self, answer_generator, answer_in_quotes=False, listify = False, verbose=False):
 
         self.answer_generator = answer_generator
         self.answer_in_quotes = answer_in_quotes
         self.listify = listify
-        self.predictor = dspy.Predict(signature=signature)
-        self.signature = signature
         self.verbose = verbose
 
     def forward(self, prompt_input, context, field_type):
 
-        # retireve chunks
-        if self.verbose:
-            print("    --INFO--: retrieving context")
-            print("              Signature Desc: ", self.signature)
-            print("              Form Desc     : ", prompt_input["answer_field_description"])
-
-
-        if self.verbose:
-            # print context
-            #print("\ncontext_nodes type:", type(context_nodes), len(context_nodes))
-            #print("node type:", type(context_nodes[0]))
-            #print("node 0:", context_nodes[0])
-            print("    --INFO--: retireval node scores:", [context_nodes[i].score for i in range(len(context_nodes))])
-            #print("node 0 text:", context_nodes[0].get_text(),"\n")
-            print("    --INFO--: context lenght in chars:", len(context))
-
-            if "Illumina" in context and "Illumina" in prompt_input["answer_field_examples"]:
-                print("-____-----------illumina in contrext-____-----------")
-
-
         # generate answer
         prompt_input["context"] = context
-        answer = self.answer_generator(self.predictor, **prompt_input)
-
+        answer = self.answer_generator(make_FormFillPrompt(**prompt_input))
+        #print("generated answer", answer, type(answer))
+        assert type(answer) is str
 
         if self.listify:
             assert answer[0] == "["
@@ -173,7 +152,7 @@ def parse_single_output(field_type, stringoutput, answer_in_quotes = None):
         output = field_type()
     return output
 
-class SequentialFormFiller(dspy.Module):
+class SequentialFormFiller:
     """
     Class for iterating through a pydantic schema, and predict each field sequentially.
     Uses outlines to ensure correct field types.
@@ -190,7 +169,6 @@ class SequentialFormFiller(dspy.Module):
                  ):
         self.llm_model = outlines_llm
         self.sampler = outlines_sampler
-        self.signature = ListedFormFillSignature if listify_form else FormFillSignature
         self.verbose = verbose
         self.max_tokens = max_tokens
 
@@ -203,7 +181,7 @@ class SequentialFormFiller(dspy.Module):
         """ Prepares generator for each field typ in the pydantic form """
         self.pydantic_form = pydantic_form
 
-        self.dspy_generators = {}
+        self.outlines_generators = {}
 
         if self.verbose:
             print("Generating regex generators...")
@@ -214,8 +192,8 @@ class SequentialFormFiller(dspy.Module):
             field_type, min_l, max_l = get_constraints_from_field(fields[fieldname])
 
             # only make a new generator if it is not equal to one already generated
-            if not (field_type, min_l, max_l) in self.dspy_generators:
-                outlines_generator = make_constrained_generator(
+            if not (field_type, min_l, max_l) in self.outlines_generators:
+                outlines_generator = regex_handling.make_constrained_generator(
                         llm_model=self.llm_model,
                         field_type=field_type,
                         min_l=min_l,
@@ -223,7 +201,8 @@ class SequentialFormFiller(dspy.Module):
                         answer_in_quotes=self.answer_in_quotes,
                         listify_form = self.listify_form,
                         sampler = self.sampler)
-                self.dspy_generators[(field_type, min_l, max_l)] = make_dspy_generator(self.llm_model, outlines_generator, max_tokens = self.max_tokens)
+                self.outlines_generators[(field_type, min_l, max_l)] = outlines_generator
+
         if self.verbose:
             print("Finished generating regex generators.")
 
@@ -235,10 +214,9 @@ class SequentialFormFiller(dspy.Module):
         for fieldname in fields:
             field = fields[fieldname]
             field_type, min_l, max_l = get_constraints_from_field(field)
-            generator = self.dspy_generators[(field_type, min_l, max_l)]
+            generator = self.outlines_generators[(field_type, min_l, max_l)]
             self.field_fillers[fieldname] = FieldFiller(
                     answer_generator = generator,
-                    signature = self.signature,
                     verbose = self.verbose,
                     answer_in_quotes = self.answer_in_quotes,
                     listify = self.listify_form,
@@ -267,15 +245,6 @@ class SequentialFormFiller(dspy.Module):
             field = fields[fieldname]
             field_type = field.annotation
 
-            if field.examples is None:
-                examples = []
-            else:
-                examples = field.examples
-                if self.answer_in_quotes:
-                    examples = [str(example) for example in examples]
-            examples = str(examples)
-            if self.answer_in_quotes:
-                examples = examples.replace("'",'"') # answering is in double quotes TODO should probably drop that just to not have to do this thing)
 
             # make prompt input
             prompt_input = {
@@ -283,13 +252,13 @@ class SequentialFormFiller(dspy.Module):
                            "answer_field_name":fieldname,
                            "answer_field_description":field.description,
                            "answer_field_type":str(field_type),
-                           "answer_field_examples":examples
+                           "listed_answer":self.listify_form,
                             }
             context = get_context(**prompt_input)
             self.contexts[fieldname] = context
 
             # generate output
-            output = self.field_fillers[fieldname](prompt_input, context, field_type)
+            output = self.field_fillers[fieldname].forward(prompt_input, context, field_type)
 
             output_dict[fieldname] = output
 
@@ -340,30 +309,30 @@ class SequentialFormFiller(dspy.Module):
         torch.cuda.empty_cache()
         return output
 
-    def deepcopy(self):
-        """ avoid copying llm_model """
-        if self.verbose:
-            print("--INFO--: deepcopy called")
-        lm = self.llm_model
-        self.llm_model = None
-        copy = super().deepcopy()
-        self.llm_model = lm
-        copy.llm_model = lm
-        return copy
+#    def deepcopy(self):
+#        """ avoid copying llm_model """
+#        if self.verbose:
+#            print("--INFO--: deepcopy called")
+#        lm = self.llm_model
+#        self.llm_model = None
+#        copy = super().deepcopy()
+#        self.llm_model = lm
+#        copy.llm_model = lm
+#        return copy
+#
+#    def reset_copy(self):
+#        """ avoid copying llm_model """
+#        if self.verbose:
+#            print("--INFO--: reset_copy called :)")
+#        lm = self.llm_model
+#        self.llm_model = None
+#        copy = super().reset_copy()
+#        self.llm_model = lm
+#        copy.llm_model = lm
+#        return copy
 
-    def reset_copy(self):
-        """ avoid copying llm_model """
-        if self.verbose:
-            print("--INFO--: reset_copy called :)")
-        lm = self.llm_model
-        self.llm_model = None
-        copy = super().reset_copy()
-        self.llm_model = lm
-        copy.llm_model = lm
-        return copy
 
-
-def get_subschema(original_schema: pydantic.BaseModel, exclude_fields: list = [], remove_maxlength_and_examples = False):
+def get_subschema(original_schema: pydantic.BaseModel, exclude_fields: list = [], remove_maxlength= False):
     """Get a pydantic form with fewer fields"""
 
     # Extract the fields from the original schema
@@ -375,14 +344,10 @@ def get_subschema(original_schema: pydantic.BaseModel, exclude_fields: list = []
 
             properties = original_schema.schema()["properties"][field]
             #print(properties)
-            if remove_maxlength_and_examples:
+            if remove_maxlength:
                 # this is needed for openai api
                 if "maxLength" in properties:
                     properties.pop("maxLength") # maxlength is simply ignored
-                if "examples" in properties:
-                    # examples are put in description instead
-                    properties["description"] = properties["description"] + "\nExamples: " + str(properties["examples"])
-                    properties.pop("examples")
 
                 new_fields[field] = (original_schema.__fields__[field].annotation, pydantic.Field(**properties))
             else:
@@ -397,7 +362,7 @@ def get_subschema(original_schema: pydantic.BaseModel, exclude_fields: list = []
 ### 
 
 
-class OpenAIFormFiller(dspy.Module):
+class OpenAIFormFiller:
     """
     """
     def __init__(self,
@@ -407,10 +372,7 @@ class OpenAIFormFiller(dspy.Module):
                  max_tokens = 50,
                  verbose = False
                  ):
-        self.lm = GPT3(model=model_id, 
-                              # kwargs, fed to when model is called)
-                              max_tokens=max_tokens,
-                              )
+        self.model_id = model_id
         self.verbose = verbose
         self.listify_form = listify_form
 
@@ -428,7 +390,7 @@ class OpenAIFormFiller(dspy.Module):
     @weave.op()
     def forward(self, get_context, exclude_fields = []):
 
-        pydantic_form = get_subschema(self.pydantic_form, exclude_fields = exclude_fields, remove_maxlength_and_examples = True)
+        pydantic_form = get_subschema(self.pydantic_form, exclude_fields = exclude_fields, remove_maxlength= True)
 
 
         output_dict = {}
@@ -437,18 +399,13 @@ class OpenAIFormFiller(dspy.Module):
         if self.listify_form:
             pydantic_form = listify_pydantic.conlistify_pydantic_model(pydantic_form, min_length=1)
             raise NotImplementedError # is this just straight forward? I guess examples and descriptions need some tweeking.
-                                      # find out if this is used first, or we need do state them in signature
-                                      # ( in that case we can make a listed signature i guess)
-            #signature =
+                                      # find out if this is used first, or we need do state them in prompt
+                                      # ( in that case we can make a listed prompt i guess)
         else:
             pydantic_form = pydantic_form
-            signature = OpenAIFormFillSignature
 
 
 
-        # prepare generation
-        dspy.settings.configure(lm=self.lm) 
-        predictor = dspy.Predict(signature=signature)
         # prepare context
         context = get_context()
         self.contexts = context
@@ -460,9 +417,25 @@ class OpenAIFormFiller(dspy.Module):
 
 
         # generate answer
-        answer = predictor(context = context,
-                           config = {"response_format" : pydantic_form},
-                           ).answer
+        completion = openai.beta.chat.completions.parse(
+                                                        model = self.model_id,
+                                                        messages = [
+                                                            {
+                                                                "role":"user",
+                                                                "content": make_FormFillPrompt(context = context, listed_answer=self.listify_form),
+                                                            }
+                                                        ],
+                                                        response_format = pydantic_form,
+                                                        )
+        if len(completion.choices) > 1:
+            print(completion)
+            print(completion.model_dump)
+            print(completion.choices)
+            quit()
+        answer = completion.choices[0].message.content
+        print("------------called openai, model=", completion.model)
+
+
         
         if self.verbose:
             print("!")
@@ -487,8 +460,7 @@ class OpenAIFormFiller(dspy.Module):
 def openAIFieldFiller(prompt_input, # used for retrieval and generation
                       context,
                       field_type,
-                      signature,
-                      lm,
+                      model_id,
                       subschema, # used for generation, and NOT retrieval
                       listify=False,
                       verbose=False
@@ -497,19 +469,29 @@ def openAIFieldFiller(prompt_input, # used for retrieval and generation
         # retireve chunks
         if verbose:
             print("    --INFO--: retrieving context")
-            print("              Signature: ", signature)
             print("              Form input    : ", prompt_input)
 
-        # prepare generation
-        dspy.settings.configure(lm=lm) 
-        predictor = dspy.Predict(signature=signature)
         # prepare context
         prompt_input["context"] = context
 
         # generate answer
-        answer = predictor(**prompt_input,
-                           config = {"response_format" : subschema},
-                           ).answer
+        completion = openai.beta.chat.completions.parse(
+                                                        model = model_id,
+                                                        messages = [
+                                                            {
+                                                                "role":"user",
+                                                                "content": make_FormFillPrompt(**prompt_input, listed_answer=listify),
+                                                            }
+                                                        ],
+                                                        response_format = subschema,
+                                                        )
+        if len(completion.choices) > 1:
+            print(completion)
+            print(completion.model_dump)
+            print(completion.choices)
+            quit()
+        answer = completion.choices[0].message.content
+        print("------------called openai, model=", completion.model)
 
         if listify:
             raise NotImplementedError
@@ -524,7 +506,7 @@ def openAIFieldFiller(prompt_input, # used for retrieval and generation
 
 
 
-class OpenAISequentialFormFiller(dspy.Module):
+class OpenAISequentialFormFiller:
     """
     """
     def __init__(self,
@@ -535,10 +517,6 @@ class OpenAISequentialFormFiller(dspy.Module):
                  verbose = False
                  ):
         self.model_id = model_id
-        self.lm = GPT3(model=model_id, 
-                              max_tokens=max_tokens,
-                              )
-        self.signature = ListedFormFillSignature if listify_form else FormFillSignature
         self.verbose = verbose
         self.max_tokens = max_tokens
         self.listify_form = listify_form
@@ -555,7 +533,7 @@ class OpenAISequentialFormFiller(dspy.Module):
     @weave.op()
     def forward(self, get_context, exclude_fields = []):
 
-        pydantic_form = get_subschema(self.pydantic_form, exclude_fields = exclude_fields) # keep examples as is for now (for retrieval)
+        pydantic_form = get_subschema(self.pydantic_form, exclude_fields = exclude_fields)
 
         fields = pydantic_form.__fields__
         output_dict = {}
@@ -568,11 +546,6 @@ class OpenAISequentialFormFiller(dspy.Module):
             field = fields[fieldname]
             field_type = field.annotation
 
-            if field.examples is None:
-                examples = []
-            else:
-                examples = field.examples
-            examples = str(examples)
 
             # make prompt input
             prompt_input = {
@@ -580,7 +553,6 @@ class OpenAISequentialFormFiller(dspy.Module):
                            "answer_field_name":fieldname, 
                            "answer_field_description":field.description, 
                            "answer_field_type":str(field_type),
-                           "answer_field_examples":examples
                             }
 
             context = get_context(**prompt_input)
@@ -588,15 +560,14 @@ class OpenAISequentialFormFiller(dspy.Module):
         
             all_other_fields = list(self.pydantic_form.__fields__.keys())
             all_other_fields.remove(fieldname)
-            subschema = get_subschema(self.pydantic_form, exclude_fields = all_other_fields, remove_maxlength_and_examples = True) # for generation, remove the stuff openai cant handle
+            subschema = get_subschema(self.pydantic_form, exclude_fields = all_other_fields, remove_maxlength= True) # for generation, remove the stuff openai cant handle
 
             # generate output
             output = openAIFieldFiller(
                       prompt_input = prompt_input,
                       context = context,
                       field_type = field_type,
-                      signature = self.signature,
-                      lm = self.lm,
+                      model_id = self.model_id,
                       subschema = subschema,
                       listify=self.listify_form,
                       verbose=self.verbose,
@@ -621,31 +592,9 @@ class OpenAISequentialFormFiller(dspy.Module):
         torch.cuda.empty_cache()
         return output
 
-    def deepcopy(self):
-        """ avoid copying llm_model """
-        if self.verbose:
-            print("--INFO--: deepcopy called")
-        lm = self.llm_model
-        self.llm_model = None
-        copy = super().deepcopy()
-        self.llm_model = lm
-        copy.llm_model = lm
-        return copy
-
-    def reset_copy(self):
-        """ avoid copying llm_model """
-        if self.verbose:
-            print("--INFO--: reset_copy called :)")
-        lm = self.llm_model
-        self.llm_model = None
-        copy = super().reset_copy()
-        self.llm_model = lm
-        copy.llm_model = lm
-        return copy
 
 
-
-class DirectKeywordSimilarityFiller(dspy.Module):
+class DirectKeywordSimilarityFiller:
     """
     Replaces the sequential form filler when using the direct keyword similarity approach.
     Retrieves similarity matrices instead of chunks, uses the best match as answer instead of generating using llm
@@ -670,21 +619,6 @@ class DirectKeywordSimilarityFiller(dspy.Module):
             self.set_pydantic_form(pydantic_form)
         self.pydantic_form = pydantic_form
 
-
-    def prepare_field_fillers(self):
-        self.field_fillers = {}
-        fields = self.pydantic_form.__fields__
-        for fieldname in fields:
-            field = fields[fieldname]
-            field_type, min_l, max_l = get_constraints_from_field(field)
-            generator = self.dspy_generators[(field_type, min_l, max_l)]
-            self.field_fillers[fieldname] = FieldFiller(
-                    answer_generator = generator,
-                    signature = self.signature,
-                    verbose = self.verbose,
-                    answer_in_quotes = self.answer_in_quotes,
-                    listify = self.listify_form,
-                    )
 
     @weave.op()
     def forward(self, context_shortener, exclude_fields = []):

@@ -1,6 +1,7 @@
 import dspy
 import pprint
 import torch
+import typing
 
 from context_shortening import RAG
 from context_shortening.chunking import chunk_by_headeres_and_clean
@@ -192,6 +193,8 @@ class Retrieval(ContextShortener):
             for fieldname in fields:
                 field = fields[fieldname]
                 field_type = field.annotation
+                if not type(field_type) == typing._LiteralGenericAlias:
+                    raise ValueError('field_info_to_compare="choices" is only possible for Literal fields.')
                 literal_values = field_type.__args__
                 field_literal_skip_number = min(self.include_choice_every, len(literal_values))
                 literal_values = literal_values[field_literal_skip_number-1::field_literal_skip_number] # only include every n'th value (srtating on n-1)
@@ -202,6 +205,8 @@ class Retrieval(ContextShortener):
             for fieldname in fields:
                 field = fields[fieldname]
                 field_type = field.annotation
+                if not type(field_type) == typing._LiteralGenericAlias:
+                    raise ValueError('field_info_to_compare="choice-list" is only possible for Literal fields.')
                 literal_values = field_type.__args__
                 field_literal_skip_number = min(self.include_choice_every, len(literal_values))
                 literal_values = literal_values[field_literal_skip_number-1::field_literal_skip_number] # only include every n'th value (srtating on n-1)

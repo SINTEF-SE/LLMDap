@@ -9,10 +9,10 @@ def make_regex_string(field_type, min_l, max_l, answer_in_quotes, listify_form):
     if listify_form and not answer_in_quotes:
         allowed_string_chars = allowed_string_chars.replace(",", "") # "," would cause trouble 
     regex_dict = {
-            int : outlines.fsm.types.INTEGER,
+            int : outlines.types.integer.pattern,
             str : allowed_string_chars + "*", # any length
-            float : outlines.fsm.types.FLOAT,
-            bool : outlines.fsm.types.BOOLEAN
+            float : outlines.types.number.pattern,
+            bool : outlines.types.boolean.pattern,
             }
     if field_type in regex_dict:
         regex = regex_dict[field_type]
@@ -50,3 +50,15 @@ def make_regex_string(field_type, min_l, max_l, answer_in_quotes, listify_form):
     #print(f"Made regex for {field_type, min_l, max_l}: {regex}")
     return regex
 
+def make_constrained_generator(field_type, llm_model, min_l, max_l, answer_in_quotes, listify_form, sampler = None):
+    """
+    make an outlines generator restricted to a specific type*, potentially with constraints, using regex to describe output restrictions 
+    * the output is always a string, but a parsable one
+    """
+
+    # get regex
+    regex = make_regex_string(field_type, min_l, max_l, answer_in_quotes, listify_form)
+
+    # make outlines generators
+    generator = outlines.generate.regex(llm_model, regex, sampler=sampler)
+    return generator

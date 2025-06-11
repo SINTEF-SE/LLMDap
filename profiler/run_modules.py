@@ -6,6 +6,7 @@ import pydantic
 from typing import Optional
 import time
 import json
+import fcntl
 import os
 import openai
 
@@ -58,7 +59,9 @@ def save_form(key, argstring, form_dict):
     data[argstring] = form_dict
     os.makedirs("all_results", exist_ok = True)
     with open("all_results/"+key+".json", "w") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
         json.dump(data, f)
+        fcntl.flock(f, fcntl.LOCK_UN)
 
 
 def save_score(argstring, scores, index_log, choice_log, dataset):
@@ -76,7 +79,9 @@ def save_score(argstring, scores, index_log, choice_log, dataset):
     data["choice_log"][argstring] = choice_log
     os.makedirs("all_results", exist_ok = True)
     with open(f"all_results/{dataset}_scores.json", "w") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
         json.dump(data, f)
+        fcntl.flock(f, fcntl.LOCK_UN)
 
 
 
@@ -113,6 +118,7 @@ class FormFillingIterator:
         self.mode = args.pop("mode")
         self.fields_length = args.pop("fields_length")
         args.pop("dataset_length")
+        args.pop("log_to_weave")
         self.argstring = str(sorted(args.items()))
 
         self.dataset_name = args["dataset"]
@@ -142,7 +148,7 @@ class FormFillingIterator:
             assert self.form_generator is None
             assert self.document_generator is None
 
-        if documents is None:
+        if self.documents is None:
             self._iterate_using_generator()
         else:
             self._iterate_using_list()
@@ -154,7 +160,12 @@ class FormFillingIterator:
     def _iterate_using_generator(self):
 
         while True:
-            key, paper_labels = self.document_generator.get_next_labels()
+            try:
+                key, paper_labels = self.document_generator.get_next_labels()
+            except StopIteration:
+                print("---------All documents predictions predicted")
+                break
+
 
             # get equal amount of predictions for each label
             # by removing labels for fields with enough predictions already
@@ -181,6 +192,8 @@ class FormFillingIterator:
             self.context_shortener.set_pydantic_form(pydantic_form)
 
             filled_form = self.fill_single_form(key,paper_text, paper_labels)
+            if filled_form is None:
+                continue # TODO log this?
 
             # log index
             self.log_index(filled_form, paper_labels, pydantic_form)
@@ -273,6 +286,12 @@ class FormFillingIterator:
             # fill out the form
             try:
                 print("--------- generating")
+                if key == "29434615" and "full_paper" in self.argstring: # too long paper for context. isolating this to ensure its only this paper.
+                    if not paper_labels is None:
+                        for field in list(set(paper_labels.keys())-set(self.remove_fields(paper_labels))):
+                            print("zeroing field:", field)
+                            self.all_scores[field].append(0)
+                        return
                 if not paper_labels is None:
                     filled_form = self.form_filler.forward(self.context_shortener, exclude_fields=self.remove_fields(paper_labels))
                 else:
@@ -289,12 +308,14 @@ class FormFillingIterator:
                 print("!! BAD REQUEST ERROR!!")
                 print(m)
                 print("skipping paper and filling zeros in score")
+                print("key:", key)
                 # evaluate
-                if self.labels:
+                #if self.labels:
+                if not paper_labels is None:
                     for field in list(set(paper_labels.keys())-set(self.remove_fields(paper_labels))):
                         print("zeroing field:", field)
                         self.all_scores[field].append(0)
-                    #all_times.append(time.time()-start_time)
+                    quit() # quitting to ensure this is noticed.
                     return
 
         elif filled_form == "skipped":
