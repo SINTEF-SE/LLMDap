@@ -14,6 +14,8 @@ except ImportError:
         from profiler.openai_key import API_KEY
     except ImportError:
         API_KEY = None
+if API_KEY:
+    os.environ["OPENAI_API_KEY"] = API_KEY
 
 # Function to load settings from settings.json
 # Duplicated here for simplicity, could be moved to a shared utils file

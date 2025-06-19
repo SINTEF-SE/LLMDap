@@ -42,9 +42,9 @@ form_filler__llm__args:
 
 form_filler__outlines__sampler__args:
     sampler:
-        default: "beam"
+        default: "multi"
         choices: ["greedy","beam", "multi"]
-        help: "sampler type"
+        help: "sampler type. beam probably requires some tweeking as it outputs a list instead of a single string"
 
 form_filler__outlines__sampler__beam__args:
     sampler_beams:
@@ -57,7 +57,7 @@ form_filler__outlines__sampler__multinomial__args:
     sampler_top_p:
         default: 1
     sampler_temp:
-        default: 0.4
+        default: 0.001
         help: "temperature"
     
 
