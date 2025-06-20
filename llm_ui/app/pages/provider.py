@@ -848,42 +848,42 @@ def show():
                                     st.session_state.error_message = f"Could not find a PMID for DOI: {value}"
                         elif input_type == 'url':
                             temp_input_path = fetch_xml_from_url(value, temp_dir)
-                            if temp_input_path and os.path.exists(temp_input_path):
-                                #  Try extracting PMID from fetched URL content
-                                if not pmid_candidate: # Only extract if we don't already have one from DOI conversion etc.
-                                     pmid_from_content = _try_extract_pmid(temp_input_path)
-                                     if pmid_from_content:
-                                          st.session_state.source_info['pmid_candidate'] = pmid_from_content
-                                          print(f"[Provider] Found potential PMID {pmid_from_content} from URL content.")
-                                          st.info(f"Debug: PMID from URL content: {pmid_from_content}") # DEBUG
-                                 # 
-
-                                # Always attempt text extraction for URL downloads
-                                st.info("Attempting to extract text content from downloaded URL file...")
-                                extracted_text_path = extract_text_from_file(temp_input_path, temp_dir, partition_func)
-                                if extracted_text_path and os.path.exists(extracted_text_path):
-                                     with open(extracted_text_path, "r", encoding="utf-8") as f:
-                                          extracted_text_content = f.read()
-                                     input_path_for_pipeline = None # Use text content, not path
-                                     st.info("Using extracted text content for pipeline.")
-                                     # Optionally re-run PMID extraction on the cleaner text ONLY if not already found via URLs DOI
-                                     if not st.session_state.source_info.get('pmid_candidate'):
-                                          st.info("Attempting PMID extraction from extracted URL text...")
-                                          pmid_from_extracted_text = _try_extract_pmid(extracted_text_path)
-                                          if pmid_from_extracted_text:
-                                               st.session_state.source_info['pmid_candidate'] = pmid_from_extracted_text
-                                               st.info(f"Debug: PMID from extracted text: {pmid_from_extracted_html}")
-                                else:
-                                     st.warning("Failed to extract text from downloaded URL file, proceeding with original file path (might cause downstream errors).")
-                                     input_path_for_pipeline = temp_input_path # Fallback to original path
-                                     extracted_text_content = None
-                                # ---------------------------------------------------------
-                            elif not st.session_state.error_message: # If fetch didn't already set an error
-                                st.session_state.error_message = "Failed to fetch or save input from URL."
                         else: # Handle case where input type was unknown or DOI conversion failed and wasn't handled
                              if not st.session_state.error_message: # Avoid overwriting specific DOI errors
                                   st.error("Invalid input type detected or required identifier missing.")
                                   st.session_state.error_message = "Invalid input or missing identifier."
+                        if temp_input_path and os.path.exists(temp_input_path):
+                            #  Try extracting PMID from fetched URL content
+                            if not pmid_candidate: # Only extract if we don't already have one from DOI conversion etc.
+                                 pmid_from_content = _try_extract_pmid(temp_input_path)
+                                 if pmid_from_content:
+                                      st.session_state.source_info['pmid_candidate'] = pmid_from_content
+                                      print(f"[Provider] Found potential PMID {pmid_from_content} from URL content.")
+                                      st.info(f"Debug: PMID from URL content: {pmid_from_content}") # DEBUG
+                             # 
+
+                            # Always attempt text extraction for URL downloads
+                            st.info("Attempting to extract text content from downloaded URL file...")
+                            extracted_text_path = extract_text_from_file(temp_input_path, temp_dir, partition_func)
+                            if extracted_text_path and os.path.exists(extracted_text_path):
+                                 with open(extracted_text_path, "r", encoding="utf-8") as f:
+                                      extracted_text_content = f.read()
+                                 input_path_for_pipeline = None # Use text content, not path
+                                 st.info("Using extracted text content for pipeline.")
+                                 # Optionally re-run PMID extraction on the cleaner text ONLY if not already found via URLs DOI
+                                 if not st.session_state.source_info.get('pmid_candidate'):
+                                      st.info("Attempting PMID extraction from extracted URL text...")
+                                      pmid_from_extracted_text = _try_extract_pmid(extracted_text_path)
+                                      if pmid_from_extracted_text:
+                                           st.session_state.source_info['pmid_candidate'] = pmid_from_extracted_text
+                                           st.info(f"Debug: PMID from extracted text: {pmid_from_extracted_html}")
+                            else:
+                                 st.warning("Failed to extract text from downloaded URL file, proceeding with original file path (might cause downstream errors).")
+                                 input_path_for_pipeline = temp_input_path # Fallback to original path
+                                 extracted_text_content = None
+                            # ---------------------------------------------------------
+                        elif not st.session_state.error_message: # If fetch didn't already set an error
+                            st.session_state.error_message = "Failed to fetch or save input from URL."
 
                     else:
                          st.error("No valid input source detected.")
