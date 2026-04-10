@@ -4,10 +4,9 @@
 
 
 
-# UPCAST profiling
+# LLMDap (LLM-based Data Profiling)
 
-This is the upcast profiling tool, that aims to profile biomedical datasets based on the papers/documents presenting the datasets.
-
+LLMDap is a generic, domain-agnostic solution for automated metadata generation. It uses Large Language Models (LLM) and Retrieval-Augmented Generation (RAG) to produce consistent, high-quality metadata. This metadata aligns with domain ontologies, improving dataset discoverability.
 
 
 ## How to run:
