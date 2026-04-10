@@ -87,3 +87,9 @@ Some missing files (in .gitignore)
   - Literal field: 1 if correct, 0 if not (with allowed answers based ontology we could introduce more levels, for values closeby in the tree)
   - string fields: Similarity based on characters
 - Literal and integer reported as accuracy, strings as similarity.
+
+## Publications
+Further information can be found in the following publications:
+- Shanshan Jiang, Sondre Sørbø, Phil Tinn, Shang Ferheng Karim and Dumitru Roman (2025). LLMDap: LLM-based Data Profiling and Sharing. Third Data Economy Workshop, 2025. https://www.vldb.org/2025/Workshops/VLDB-Workshops-2025/DEC/DEC25_5.pdf
+- Phil Tinn, Sondre Sørbø, Shanshan Jiang, Konstantinos Voutetakis, Sotiris Moudouris Giounis, Eleftherios Pilalis, Olga Papadodima, Dumitru Roman (2025). Pre-Meta: Priors-augmented Retrieval for LLM-based Metadata Generation. Bioinformatics, 2025; https://doi.org/10.1093/bioinformatics/btaf519
+
